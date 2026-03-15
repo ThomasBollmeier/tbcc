@@ -1,6 +1,9 @@
 [package]
 name = "tbcc"
 version = "0.1.0"
-edition = "2021"
+edition = "2024"
+authors = ["Thomas Bollmeier"]
 
 [dependencies]
+clap = { version = "4.5.51", features = ["derive"] }
+anyhow = "1.0.100"
