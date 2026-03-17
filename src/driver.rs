@@ -6,10 +6,34 @@ use crate::cli::Options;
 pub fn compile(options: &Options) -> Result<()> {
     let _preprocessed_file = preprocess(&options.source)?;
 
+    // run lexer...
 
+    if options.lex {
+        return Ok(());
+    }
+
+    // parse...
+
+    if options.parse {
+        return Ok(());
+    }
+
+    // generate assembly...
+
+    if options.codegen {
+        return Ok(());
+    }
+
+    // generate code ...
+
+    if !options.dont_assemble {
+        // assemble and link...
+    }
 
     Ok(())
 }
+
+
 
 
 fn preprocess(source_file: &str) -> Result<String> {
