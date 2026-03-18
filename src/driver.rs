@@ -2,11 +2,14 @@ use anyhow::{anyhow, Result};
 use std::path::Path;
 use std::process::Command;
 use crate::cli::Options;
+use crate::lexer::Lexer;
 
 pub fn compile(options: &Options) -> Result<()> {
-    let _preprocessed_file = preprocess(&options.source)?;
+    let preprocessed_file = preprocess(&options.source)?;
+    let code = std::fs::read_to_string(&preprocessed_file)?;
 
-    // run lexer...
+    let lexer = Lexer::new();
+    let _tokens = lexer.scan_tokens(&code)?;
 
     if options.lex {
         return Ok(());

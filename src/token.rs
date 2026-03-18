@@ -2,7 +2,16 @@
 pub enum TokenType {
     Whitespace,
     Identifier,
-    Integer,
+    IntegerConstant,
+    Int,
+    Void,
+    Return,
+    LeftParen,
+    RightParen,
+    LeftBrace,
+    RightBrace,
+    Comma,
+    Semicolon,
 }
 
 #[derive(Debug, Clone, PartialEq)]

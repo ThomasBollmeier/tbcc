@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use crate::token::{Token, TokenType, TokenValue};
 use anyhow::Result;
 use regex::Regex;
@@ -14,30 +15,27 @@ struct TokenTypeData {
 
 pub struct Lexer {
     token_types: Vec<TokenTypeData>,
+    keywords: HashMap<String, TokenType>,
 }
 
 impl Lexer {
     pub fn new() -> Lexer {
         let mut lexer = Lexer {
             token_types: Vec::new(),
+            keywords: HashMap::new(),
         };
 
-        lexer.add_token_type(
-            TokenType::Whitespace,
-            r"^\s+",
-            true,
-            None,
-        );
+        lexer.add_token_type_full(TokenType::Whitespace, r"^\s+", true, None);
 
-        lexer.add_token_type(
+        lexer.add_token_type_full(
             TokenType::Identifier,
             r"^[a-zA-Z_][a-zA-Z0-9_]*\b",
             false,
             None,
         );
 
-        lexer.add_token_type(
-            TokenType::Integer,
+        lexer.add_token_type_full(
+            TokenType::IntegerConstant,
             r"^\d+\b",
             false,
             Some(|lexeme| {
@@ -46,10 +44,20 @@ impl Lexer {
             }),
         );
 
+        lexer.add_token_type(TokenType::LeftParen, r"^\(");
+        lexer.add_token_type(TokenType::RightParen, r"^\)");
+        lexer.add_token_type(TokenType::LeftBrace, r"^\{");
+        lexer.add_token_type(TokenType::RightBrace, r"^\}");
+        lexer.add_token_type(TokenType::Semicolon, r"^;");
+
+        lexer.keywords.insert("int".to_string(), TokenType::Int);
+        lexer.keywords.insert("void".to_string(), TokenType::Void);
+        lexer.keywords.insert("return".to_string(), TokenType::Return);
+
         lexer
     }
 
-    pub fn scan_tokens(&mut self, code: &str) -> Result<Vec<Token>> {
+    pub fn scan_tokens(&self, code: &str) -> Result<Vec<Token>> {
         let mut tokens: Vec<Token> = Vec::new();
         let mut line: usize = 1;
         let mut column: usize = 1;
@@ -66,6 +74,12 @@ impl Lexer {
                     remaining = remaining[lexeme.len()..].to_string();
 
                     if !skip {
+                        let token_type = if token_type == TokenType::Identifier {
+                            self.keywords.get(&lexeme).cloned().unwrap_or(TokenType::Identifier)
+                        } else {
+                            token_type
+                        };
+
                         let token =
                             Token::new(token_type, value_opt, lexeme, curr_line, curr_column);
                         tokens.push(token);
@@ -85,16 +99,20 @@ impl Lexer {
         Ok(tokens)
     }
 
-    fn add_token_type(
+    fn add_token_type(&mut self, token_type: TokenType, pattern: &str) {
+        self.add_token_type_full(token_type, pattern, false, None);
+    }
+
+    fn add_token_type_full(
         &mut self,
         token_type: TokenType,
-        regex: &str,
+        pattern: &str,
         skip: bool,
         value_fn_opt: Option<ValueFn>,
     ) {
         let token_type_data = TokenTypeData {
             token_type,
-            regex: Regex::new(regex).unwrap(),
+            regex: Regex::new(pattern).unwrap(),
             skip,
             value_fn_opt,
         };
@@ -152,7 +170,7 @@ mod tests {
 
     #[test]
     fn scan_tokens() {
-        let mut lexer = Lexer::new();
+        let lexer = Lexer::new();
         let code = r#"
             answer
             42
@@ -167,12 +185,24 @@ mod tests {
         assert_eq!(tokens[0].line, 2);
         assert_eq!(tokens[0].column, 13);
 
-        assert_eq!(tokens[1].token_type, TokenType::Integer);
+        assert_eq!(tokens[1].token_type, TokenType::IntegerConstant);
         assert_eq!(tokens[1].value, Some(TokenValue::Integer(42)));
         assert_eq!(tokens[1].lexeme, "42");
         assert_eq!(tokens[1].line, 3);
         assert_eq!(tokens[1].column, 13);
-
     }
 
+    #[test]
+    fn scan_main_function() {
+        let lexer = Lexer::new();
+        let code = r#"
+int main(void) {
+    return 42;
+}"#;
+
+        let tokens = lexer.scan_tokens(code).unwrap();
+        assert_eq!(tokens.len(), 10);
+
+        //dbg!(tokens);
+    }
 }
