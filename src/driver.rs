@@ -3,19 +3,21 @@ use std::path::Path;
 use std::process::Command;
 use crate::cli::Options;
 use crate::lexer::Lexer;
+use crate::parser::Parser;
 
 pub fn compile(options: &Options) -> Result<()> {
     let preprocessed_file = preprocess(&options.source)?;
     let code = std::fs::read_to_string(&preprocessed_file)?;
 
     let lexer = Lexer::new();
-    let _tokens = lexer.scan_tokens(&code)?;
+    let tokens = lexer.scan_tokens(&code)?;
 
     if options.lex {
         return Ok(());
     }
 
-    // parse...
+    let parser = Parser::new();
+    let _program = parser.parse(tokens)?;
 
     if options.parse {
         return Ok(());

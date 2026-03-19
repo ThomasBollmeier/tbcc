@@ -45,3 +45,37 @@ impl Token {
         }
     }
 }
+
+pub struct TokenStream {
+    tokens: Vec<Token>,
+    position: usize,
+}
+
+impl TokenStream {
+    pub fn new(tokens: Vec<Token>) -> TokenStream {
+        TokenStream {
+            tokens,
+            position: 0,
+        }
+    }
+
+    pub fn has_next(&self) -> bool {
+        self.position < self.tokens.len()
+    }
+
+    pub fn peek(&self) -> Option<&Token> {
+        self.tokens.get(self.position)
+    }
+
+    pub fn peek_with_offset(&self, offset: usize) -> Option<&Token> {
+        self.tokens.get(self.position + offset)
+    }
+
+    pub fn advance(&mut self) -> Option<&Token> {
+        let result = self.tokens.get(self.position);
+        self.position += 1;
+        result
+    }
+}
+
+
