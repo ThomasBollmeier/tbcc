@@ -43,7 +43,7 @@ impl Statement {
 
 #[derive(Debug, Clone)]
 pub enum Expression {
-    IntegerConstant(i64),
+    IntegerConstant(i32),
 }
 
 impl Expression {

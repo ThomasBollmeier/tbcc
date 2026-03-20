@@ -39,7 +39,7 @@ impl Lexer {
             r"^\d+\b",
             false,
             Some(|lexeme| {
-                let value = lexeme.parse::<i64>().unwrap();
+                let value = lexeme.parse::<i32>().unwrap();
                 TokenValue::Integer(value)
             }),
         );

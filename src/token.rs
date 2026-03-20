@@ -16,7 +16,7 @@ pub enum TokenType {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum TokenValue {
-    Integer(i64),
+    Integer(i32),
 }
 
 #[derive(Debug, Clone)]

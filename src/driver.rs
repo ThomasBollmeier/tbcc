@@ -1,6 +1,7 @@
 use anyhow::{anyhow, Result};
 use std::path::Path;
 use std::process::Command;
+use crate::assembly_ast::AssemblyCreator;
 use crate::cli::Options;
 use crate::lexer::Lexer;
 use crate::parser::Parser;
@@ -17,13 +18,14 @@ pub fn compile(options: &Options) -> Result<()> {
     }
 
     let parser = Parser::new();
-    let _program = parser.parse(tokens)?;
+    let program = parser.parse(tokens)?;
 
     if options.parse {
         return Ok(());
     }
 
-    // generate assembly...
+    let mut assembly_creator = AssemblyCreator::new();
+    let _asm_program = assembly_creator.create_assembly_program(&program)?;
 
     if options.codegen {
         return Ok(());
