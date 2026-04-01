@@ -44,12 +44,19 @@ impl Statement {
 #[derive(Debug, Clone)]
 pub enum Expression {
     IntegerConstant(i32),
+    UnaryExpr(UnaryOp, Box<Expression>),
 }
 
 impl Expression {
     pub fn accept<R>(&self, visitor: &mut impl Visitor<R>) -> R {
         visitor.visit_expression(self)
     }
+}
+
+#[derive(Debug, Clone)]
+pub enum UnaryOp {
+    Negate,
+    Complement,
 }
 
 pub trait Visitor<A> {

@@ -131,6 +131,7 @@ impl AstVisitor<Result<ASTNode>> for AssemblyCreator {
     fn visit_expression(&mut self, expr: &Expression) -> Result<ASTNode> {
         match expr {
             Expression::IntegerConstant(value) => Ok(ASTNode::Operand(Operand::Immediate(*value))),
+            _ => todo!("implement")
         }
     }
 }

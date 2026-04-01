@@ -1,7 +1,7 @@
-use crate::ast::{Expression, FunctionDefinition, Program, Statement};
-use anyhow::{anyhow, Result};
 use crate::ast::Statement::Return;
+use crate::ast::{Expression, FunctionDefinition, Program, Statement, UnaryOp};
 use crate::token::{Token, TokenStream, TokenType, TokenValue};
+use anyhow::{Result, anyhow};
 
 pub struct Parser {}
 
@@ -52,12 +52,31 @@ impl Parser {
     }
 
     fn expression(&self, stream: &mut TokenStream) -> Result<Expression> {
-        let token = self.expect(stream, TokenType::IntegerConstant)?;
-        if let Some(TokenValue::Integer(value)) = token.value {
-            Ok(Expression::IntegerConstant(value))
-        } else {
-            Err(anyhow!("Expected integer constant value"))
+        let token = self.consume(stream)?;
+        match token.token_type {
+            TokenType::IntegerConstant => {
+                if let Some(TokenValue::Integer(value)) = token.value {
+                    Ok(Expression::IntegerConstant(value))
+                } else {
+                    Err(anyhow!("Expected integer constant value"))
+                }
+            }
+            TokenType::Minus | TokenType::Tilde => {
+                let op = if token.token_type == TokenType::Minus {
+                    UnaryOp::Negate
+                } else {
+                    UnaryOp::Complement
+                };
+                Ok(Expression::UnaryExpr(op, Box::new(self.expression(stream)?)))
+            }
+            TokenType::LeftParen => {
+                let expr = self.expression(stream)?;
+                self.expect(stream, TokenType::RightParen)?;
+                Ok(expr)
+            }
+            _ => Err(anyhow!("Unexpected token {:?}", token))
         }
+
     }
 
     fn expect(&self, stream: &mut TokenStream, expected_type: TokenType) -> Result<Token> {
@@ -66,30 +85,79 @@ impl Parser {
                 if token.token_type == expected_type {
                     Ok(token.clone())
                 } else {
-                    Err(anyhow!("Expected token {:?}, got {:?}", expected_type, token.token_type))
+                    Err(anyhow!(
+                        "Expected token {:?}, got {:?}",
+                        expected_type,
+                        token.token_type
+                    ))
                 }
-            },
-            None => Err(anyhow!("Expected token of type {:?} but found end of input", expected_type)),
+            }
+            None => Err(anyhow!(
+                "Expected token of type {:?} but found end of input",
+                expected_type
+            )),
         }
     }
 
+    fn consume(&self, stream: &mut TokenStream) -> Result<Token> {
+        Ok(stream
+            .advance()
+            .ok_or_else(|| anyhow!("Unexpected end of input"))?
+            .clone())
+    }
+
+    fn _peek<'a>(&self, stream: &'a TokenStream) -> Option<&'a Token> {
+        stream.peek()
+    }
 }
 
 #[cfg(test)]
 mod tests {
-    use crate::lexer::Lexer;
     use super::*;
+    use crate::lexer::Lexer;
 
     #[test]
     fn parses_with_success() {
+        let code = "int main(void) { return 42; }";
+        parse_code(code, true);
+    }
+
+    #[test]
+    fn parse_with_negation_and_complement() {
+        let code = "int main(void) { return -(-(~42)); }";
+        parse_code(code, true);
+    }
+
+    #[test]
+    fn parse_bitwise() {
+        let code = r#"
+        int main(void) {
+            return ~12;
+        }
+        "#;
+        parse_code(code, true);
+    }
+
+    fn parse_code(code: &str, expect_success: bool) {
         let parser = Parser::new();
         let lexer = Lexer::new();
 
-        let code = "int main(void) { return 42; }";
-
         let tokens = lexer.scan_tokens(code).expect("Failed to scan tokens");
-        let program = parser.parse(tokens).expect("Failed to parse program");
+        let result = parser.parse(tokens);
 
-        dbg!(&program);
+        match result {
+            Ok(program) => {
+                if expect_success {
+                    dbg!(&program);
+                } else {
+                    panic!("Expected parsing to fail but it succeeded");
+                }
+            }
+            Err(err) => {
+                if expect_success {
+                    panic!("{}", err);
+                }
+            }
+        }
     }
 }

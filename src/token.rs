@@ -12,6 +12,9 @@ pub enum TokenType {
     RightBrace,
     Comma,
     Semicolon,
+    Minus,
+    MinusMinus,
+    Tilde,
 }
 
 #[derive(Debug, Clone, PartialEq)]

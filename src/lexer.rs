@@ -48,7 +48,11 @@ impl Lexer {
         lexer.add_token_type(TokenType::RightParen, r"^\)");
         lexer.add_token_type(TokenType::LeftBrace, r"^\{");
         lexer.add_token_type(TokenType::RightBrace, r"^\}");
+        lexer.add_token_type(TokenType::Comma, r"^,");
         lexer.add_token_type(TokenType::Semicolon, r"^;");
+        lexer.add_token_type(TokenType::Minus, r"^\-");
+        lexer.add_token_type(TokenType::MinusMinus, r"^\-\-");
+        lexer.add_token_type(TokenType::Tilde, r"^~");
 
         lexer.keywords.insert("int".to_string(), TokenType::Int);
         lexer.keywords.insert("void".to_string(), TokenType::Void);
@@ -204,5 +208,35 @@ int main(void) {
         assert_eq!(tokens.len(), 10);
 
         //dbg!(tokens);
+    }
+
+    #[test]
+    fn scan_tilde_decrement() {
+        let lexer = Lexer::new();
+        let code = r#"
+        ~a--;
+        "#;
+
+        let tokens = lexer.scan_tokens(code).unwrap();
+        assert_eq!(tokens.len(), 4);
+        assert_eq!(tokens[0].token_type, TokenType::Tilde);
+        assert_eq!(tokens[0].lexeme, "~");
+        assert_eq!(tokens[0].line, 2);
+        assert_eq!(tokens[0].column, 9);
+
+        assert_eq!(tokens[1].token_type, TokenType::Identifier);
+        assert_eq!(tokens[1].lexeme, "a");
+        assert_eq!(tokens[1].line, 2);
+        assert_eq!(tokens[1].column, 10);
+
+        assert_eq!(tokens[2].token_type, TokenType::MinusMinus);
+        assert_eq!(tokens[2].lexeme, "--");
+        assert_eq!(tokens[2].line, 2);
+        assert_eq!(tokens[2].column, 11);
+
+        assert_eq!(tokens[3].token_type, TokenType::Semicolon);
+        assert_eq!(tokens[3].lexeme, ";");
+        assert_eq!(tokens[3].line, 2);
+        assert_eq!(tokens[3].column, 13);
     }
 }
