@@ -6,3 +6,4 @@ pub mod ast;
 pub mod parser;
 pub mod assembly_ast;
 pub mod codegen;
+pub mod tacky;

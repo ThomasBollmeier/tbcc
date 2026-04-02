@@ -6,6 +6,7 @@ use crate::parser::Parser;
 use anyhow::{Result, anyhow};
 use std::path::Path;
 use std::process::Command;
+use crate::tacky::TackyEmitter;
 
 pub fn compile(options: &Options) -> Result<()> {
     let preprocessed_file = create_preprocessed_file(&options.source)?;
@@ -24,6 +25,13 @@ pub fn compile(options: &Options) -> Result<()> {
     let program = parser.parse(tokens)?;
 
     if options.parse {
+        return Ok(());
+    }
+
+    let mut tacky_emitter = TackyEmitter::new();
+    let _tacky_program = tacky_emitter.emit_program(&program)?;
+
+    if options.tacky {
         return Ok(());
     }
 
