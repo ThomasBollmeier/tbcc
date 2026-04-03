@@ -1,15 +1,6 @@
-use crate::ast::{Expression, FunctionDefinition, Statement, UnaryOp, Visitor as AstVisitor};
+use crate::ast::{Expression, FunctionDefinition, Statement, UnaryOp};
 use crate::tacky::Instruction::Unary;
 use anyhow::Result;
-
-#[derive(Debug, Clone, PartialEq)]
-pub enum Node {
-    Program(Program),
-    FunctionDef(FunctionDef),
-    Instruction(Instruction),
-    Value(Value),
-    UnaryOperator(UnaryOperator),
-}
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Program {
@@ -54,8 +45,20 @@ impl TackyEmitter {
         TackyEmitter { cnt_tmp_vars: 0 }
     }
 
-    pub fn emit_program(&mut self, program: &crate::ast::Program) -> Result<Node> {
-        program.accept(self)
+    pub fn emit_program(&mut self, program: &crate::ast::Program) -> Result<Program> {
+        let func_def = self.emit_function_def(&program.function_definition)?;
+
+        Ok(Program { func_def })
+    }
+
+    fn emit_function_def(&mut self, function_definition: &FunctionDefinition) -> Result<FunctionDef> {
+        let name = function_definition.name.clone();
+        let instructions = self.emit_statement(&function_definition.body);
+
+        Ok(FunctionDef {
+            name,
+            body: instructions,
+        })
     }
 
     fn emit_statement(&mut self, stmt: &Statement) -> Vec<Instruction> {
@@ -93,36 +96,6 @@ impl TackyEmitter {
         let ret = format!("tmp.{}", self.cnt_tmp_vars);
         self.cnt_tmp_vars += 1;
         ret
-    }
-}
-
-impl AstVisitor<Result<Node>> for TackyEmitter {
-    fn visit_program(&mut self, program: &crate::ast::Program) -> Result<Node> {
-        let func_def = program.function_definition.accept(self)?;
-
-        if let Node::FunctionDef(func_def) = func_def {
-            Ok(Node::Program(Program { func_def }))
-        } else {
-            Err(anyhow::anyhow!("Not a function"))
-        }
-    }
-
-    fn visit_function_definition(&mut self, func_def: &FunctionDefinition) -> Result<Node> {
-        let name = func_def.name.clone();
-        let instructions = self.emit_statement(&func_def.body);
-
-        Ok(Node::FunctionDef(FunctionDef {
-            name,
-            body: instructions,
-        }))
-    }
-
-    fn visit_statement(&mut self, _stmt: &Statement) -> Result<Node> {
-        unimplemented!()
-    }
-
-    fn visit_expression(&mut self, _expr: &Expression) -> Result<Node> {
-        unimplemented!()
     }
 }
 

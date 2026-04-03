@@ -4,6 +4,6 @@ pub mod token;
 pub mod lexer;
 pub mod ast;
 pub mod parser;
-pub mod assembly_ast;
-pub mod codegen;
 pub mod tacky;
+pub mod assembly;
+pub mod codegen;

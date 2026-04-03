@@ -1,4 +1,4 @@
-use crate::assembly_ast::AssemblyCreator;
+use crate::assembly;
 use crate::cli::Options;
 use crate::codegen::CodeGenerator;
 use crate::lexer::Lexer;
@@ -29,14 +29,13 @@ pub fn compile(options: &Options) -> Result<()> {
     }
 
     let mut tacky_emitter = TackyEmitter::new();
-    let _tacky_program = tacky_emitter.emit_program(&program)?;
+    let tacky_program = tacky_emitter.emit_program(&program)?;
 
     if options.tacky {
         return Ok(());
     }
 
-    let mut assembly_creator = AssemblyCreator::new();
-    let asm_program = assembly_creator.create_assembly_program(&program)?;
+    let asm_program = assembly::create_program(&tacky_program)?;
 
     if options.codegen {
         return Ok(());
