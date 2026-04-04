@@ -15,6 +15,10 @@ pub enum TokenType {
     Minus,
     MinusMinus,
     Tilde,
+    Plus,
+    Asterisk,
+    Slash,
+    Percent,
 }
 
 #[derive(Debug, Clone, PartialEq)]

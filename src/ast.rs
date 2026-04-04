@@ -45,6 +45,7 @@ impl Statement {
 pub enum Expression {
     IntegerConstant(i32),
     UnaryExpr(UnaryOp, Box<Expression>),
+    BinaryExpr(BinaryOp, Box<Expression>, Box<Expression>),
 }
 
 impl Expression {
@@ -57,6 +58,15 @@ impl Expression {
 pub enum UnaryOp {
     Negate,
     Complement,
+}
+
+#[derive(Debug, Clone)]
+pub enum BinaryOp {
+    Add,
+    Subtract,
+    Multiply,
+    Divide,
+    Remainder,
 }
 
 pub trait Visitor<A> {

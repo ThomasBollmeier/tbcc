@@ -1,5 +1,5 @@
 use crate::ast::Statement::Return;
-use crate::ast::{Expression, FunctionDefinition, Program, Statement, UnaryOp};
+use crate::ast::{BinaryOp, Expression, FunctionDefinition, Program, Statement, UnaryOp};
 use crate::token::{Token, TokenStream, TokenType, TokenValue};
 use anyhow::{Result, anyhow};
 
@@ -46,12 +46,50 @@ impl Parser {
 
     fn statement(&self, stream: &mut TokenStream) -> Result<Statement> {
         self.expect(stream, TokenType::Return)?;
-        let expr = self.expression(stream)?;
+        let expr = self.expression(stream, 0)?;
         self.expect(stream, TokenType::Semicolon)?;
         Ok(Return(expr))
     }
 
-    fn expression(&self, stream: &mut TokenStream) -> Result<Expression> {
+    fn expression(&self, stream: &mut TokenStream, min_precedence: i32) -> Result<Expression> {
+        let mut left = self.factor(stream)?;
+
+        while let Some(token) = stream.peek() {
+            let op = match self.get_binary_op(&token.token_type) {
+                Some(op) => op,
+                None => break,
+            };
+            let prec = self.get_precedence(&op);
+            if prec < min_precedence {
+                break;
+            }
+            stream.advance(); // consume the operator
+            let right = self.expression(stream, prec + 1)?;
+            left = Expression::BinaryExpr(op, Box::new(left), Box::new(right));
+        }
+
+        Ok(left)
+    }
+
+    fn get_binary_op(&self, token_type: &TokenType) -> Option<BinaryOp> {
+        match token_type {
+            TokenType::Plus => Some(BinaryOp::Add),
+            TokenType::Minus => Some(BinaryOp::Subtract),
+            TokenType::Asterisk => Some(BinaryOp::Multiply),
+            TokenType::Slash => Some(BinaryOp::Divide),
+            TokenType::Percent => Some(BinaryOp::Remainder),
+            _ => None,
+        }
+    }
+
+    fn get_precedence(&self, binary_op: &BinaryOp) -> i32 {
+        match binary_op {
+            BinaryOp::Add | BinaryOp::Subtract => 45,
+            BinaryOp::Multiply | BinaryOp::Divide | BinaryOp::Remainder => 50,
+        }
+    }
+
+    fn factor(&self, stream: &mut TokenStream) -> Result<Expression> {
         let token = self.consume(stream)?;
         match token.token_type {
             TokenType::IntegerConstant => {
@@ -67,16 +105,15 @@ impl Parser {
                 } else {
                     UnaryOp::Complement
                 };
-                Ok(Expression::UnaryExpr(op, Box::new(self.expression(stream)?)))
+                Ok(Expression::UnaryExpr(op, Box::new(self.factor(stream)?)))
             }
             TokenType::LeftParen => {
-                let expr = self.expression(stream)?;
+                let expr = self.expression(stream, 0)?;
                 self.expect(stream, TokenType::RightParen)?;
                 Ok(expr)
             }
-            _ => Err(anyhow!("Unexpected token {:?}", token))
+            _ => Err(anyhow!("Unexpected token {:?}", token)),
         }
-
     }
 
     fn expect(&self, stream: &mut TokenStream, expected_type: TokenType) -> Result<Token> {
@@ -105,10 +142,6 @@ impl Parser {
             .ok_or_else(|| anyhow!("Unexpected end of input"))?
             .clone())
     }
-
-    fn _peek<'a>(&self, stream: &'a TokenStream) -> Option<&'a Token> {
-        stream.peek()
-    }
 }
 
 #[cfg(test)]
@@ -135,6 +168,15 @@ mod tests {
             return ~12;
         }
         "#;
+        parse_code(code, true);
+    }
+
+    #[test]
+    fn parse_binary() {
+        let code = r#"
+        int main(void) {
+            return 1 + 2 * 3;
+        }"#;
         parse_code(code, true);
     }
 

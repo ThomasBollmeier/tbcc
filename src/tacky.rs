@@ -89,6 +89,9 @@ impl TackyEmitter {
                 });
                 dst
             }
+            Expression::BinaryExpr(_, _, _) => {
+                unimplemented!("Binary expressions are not implemented yet")
+            }
         }
     }
 
