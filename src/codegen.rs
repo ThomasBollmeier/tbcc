@@ -1,4 +1,4 @@
-use crate::assembly::ast::{FuncDef, Instruction, Operand, Program};
+use crate::assembly::ast::{FuncDef, Instruction, Operand, Program, Register, UnaryOp, Visitor};
 
 pub struct CodeGenerator {
     code: String,
@@ -12,41 +12,8 @@ impl CodeGenerator {
     }
 
     pub fn generate_assembly(mut self, asm_program: &Program) -> String {
-        self.code = String::new();
-        self.write_program(asm_program);
-        // If running in Linux, we need to add the .note.GNU-stack section to indicate that the stack is not executable
-        if cfg!(target_os = "linux") {
-            self.code
-                .push_str(".section .note.GNU-stack,\"\",@progbits\n");
-        }
+        asm_program.walk(&mut self);
         self.code.clone()
-    }
-
-    fn write_program(&mut self, asm_program: &Program) {
-        self.write_comment("===== Program =====");
-        self.write_function_def(&asm_program.0);
-    }
-
-    fn write_function_def(&mut self, func_def: &FuncDef) {
-        self.write_instruction(&format!(".globl {}", func_def.name));
-        self.write_label(&func_def.name);
-        for inst in &func_def.instructions {
-            self.write_inst(&inst);
-        }
-    }
-
-    fn write_inst(&mut self, inst: &Instruction) {
-        match inst {
-            Instruction::Mov { src, dst } => {
-                let src = self.operand_to_string(src);
-                let dst = self.operand_to_string(dst);
-                self.write_instruction(&format!("movl {src}, {dst}"));
-            }
-            Instruction::Ret => {
-                self.write_instruction("ret");
-            }
-            _ => todo!("Unsupported instruction: {:?}", inst),
-        }
     }
 
     fn write_instruction(&mut self, inst: &str) {
@@ -64,8 +31,63 @@ impl CodeGenerator {
     fn operand_to_string(&self, operand: &Operand) -> String {
         match operand {
             Operand::Immediate(imm) => format!("${}", imm),
-            Operand::Register(_) => "%eax".to_string(),
-            _ => todo!("Unsupported operand type: {:?}", operand),
+            Operand::Register(Register::AX) => "%eax".to_string(),
+            Operand::Register(Register::R10) => "%r10d".to_string(),
+            Operand::Stack(offset) => format!("{}(%rbp)", offset),
+            _ => panic!("Unsupported operand type: {:?}", operand),
+        }
+    }
+
+    fn unary_op_to_string(&self, unary_op: &UnaryOp) -> String {
+        match unary_op {
+            UnaryOp::Neg => "negl".to_string(),
+            UnaryOp::Not => "notl".to_string(),
+        }
+    }
+}
+
+impl Visitor for CodeGenerator {
+    fn enter_program(&mut self, _program: &Program) {
+        self.code = String::new();
+        self.write_comment("===== Program =====");
+    }
+
+    fn exit_program(&mut self, _program: &Program) {
+        // If running in Linux, we need to add the .note.GNU-stack section to indicate that the stack is not executable
+        if cfg!(target_os = "linux") {
+            self.code
+                .push_str(".section .note.GNU-stack,\"\",@progbits\n");
+        }
+    }
+
+    fn enter_func_def(&mut self, func_def: &FuncDef) {
+        self.write_instruction(&format!(".globl {}", func_def.name));
+        self.write_label(&func_def.name);
+        self.write_instruction("pushq \t%rbp");
+        self.write_instruction("movq \t%rsp, %rbp");
+    }
+    fn exit_func_def(&mut self, _func_def: &FuncDef) {}
+
+    fn visit_instruction(&mut self, instruction: &Instruction) {
+        match instruction {
+            Instruction::Mov { src, dst } => {
+                let src = self.operand_to_string(src);
+                let dst = self.operand_to_string(dst);
+                self.write_instruction(&format!("movl \t{src}, {dst}"));
+            }
+            Instruction::Ret => {
+                self.write_instruction("movq \t%rbp, %rsp");
+                self.write_instruction("popq \t%rbp");
+                self.write_instruction("ret");
+            }
+            Instruction::Unary { op, operand } => {
+                let op_str = self.unary_op_to_string(op);
+                let operand_str = self.operand_to_string(operand);
+                self.write_instruction(&format!("{op_str} \t{operand_str}"));
+            }
+            Instruction::AllocateStack(size) => {
+                self.write_instruction(&format!("subq \t${size}, %rsp"));
+            }
         }
     }
 }

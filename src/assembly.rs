@@ -12,10 +12,10 @@ pub fn create_program(tacky_program: &crate::tacky::Program) -> Result<ast::Prog
     let mut asm_program = assembly_creator.create_program(tacky_program)?;
 
     let mut pseudo_reg_replacer = pseudo_reg_replacer::PseudoRegReplacer::new();
-    asm_program.walk(&mut pseudo_reg_replacer);
+    asm_program.walk_mut(&mut pseudo_reg_replacer);
 
     let mut instruction_fixer = InstructionFixer::new(pseudo_reg_replacer.get_frame_size());
-    asm_program.walk(&mut instruction_fixer);
+    asm_program.walk_mut(&mut instruction_fixer);
 
     Ok(asm_program)
 }

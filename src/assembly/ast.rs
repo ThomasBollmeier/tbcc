@@ -6,23 +6,43 @@ impl Program {
         Self(def)
     }
 
-    pub fn walk(&mut self, visitor: &mut impl VisitorMut) {
+    pub fn walk(&self, visitor: &mut impl Visitor) {
         visitor.enter_program(self);
-        Self::walk_func_def(&mut self.0, visitor);
+        Self::walk_func_def(&self.0, visitor);
         visitor.exit_program(self);
     }
 
-    fn walk_func_def(func_def: &mut FuncDef, visitor: &mut impl VisitorMut) {
+    pub fn walk_mut(&mut self, visitor: &mut impl VisitorMut) {
+        visitor.enter_program(self);
+        Self::walk_func_def_mut(&mut self.0, visitor);
+        visitor.exit_program(self);
+    }
+
+    fn walk_func_def_mut(func_def: &mut FuncDef, visitor: &mut impl VisitorMut) {
         visitor.enter_func_def(func_def);
 
         for instruction in &mut func_def.instructions {
+            Self::walk_instruction_mut(instruction, visitor);
+        }
+
+        visitor.exit_func_def(func_def);
+    }
+
+    fn walk_instruction_mut(instruction: &mut Instruction, visitor: &mut impl VisitorMut) {
+        visitor.visit_instruction(instruction);
+    }
+
+    fn walk_func_def(func_def: &FuncDef, visitor: &mut impl Visitor) {
+        visitor.enter_func_def(func_def);
+
+        for instruction in &func_def.instructions {
             Self::walk_instruction(instruction, visitor);
         }
 
         visitor.exit_func_def(func_def);
     }
 
-    fn walk_instruction(instruction: &mut Instruction, visitor: &mut impl VisitorMut) {
+    fn walk_instruction(instruction: &Instruction, visitor: &mut impl Visitor) {
         visitor.visit_instruction(instruction);
     }
 }
@@ -67,6 +87,14 @@ pub enum Register {
     R10,
 }
 
+#[allow(unused_variables)]
+pub trait Visitor {
+    fn enter_program(&mut self, program: &Program) {}
+    fn exit_program(&mut self, program: &Program) {}
+    fn enter_func_def(&mut self, func_def: &FuncDef) {}
+    fn exit_func_def(&mut self, func_def: &FuncDef) {}
+    fn visit_instruction(&mut self, instruction: &Instruction) {}
+}
 
 #[allow(unused_variables)]
 pub trait VisitorMut {

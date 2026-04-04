@@ -50,7 +50,7 @@ mod tests {
     fn apply_fixer(instructions: Vec<Instruction>, stack_frame_size: usize) -> Vec<Instruction> {
         let mut program = Program::new(FuncDef::new("main".to_string(), instructions));
         let mut fixer = InstructionFixer::new(stack_frame_size);
-        program.walk(&mut fixer);
+        program.walk_mut(&mut fixer);
         program.0.instructions
     }
 

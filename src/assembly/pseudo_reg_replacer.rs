@@ -64,7 +64,7 @@ mod tests {
     fn apply_replacer(instructions: Vec<Instruction>) -> (Vec<Instruction>, usize) {
         let mut program = Program::new(FuncDef::new("main".to_string(), instructions));
         let mut replacer = PseudoRegReplacer::new();
-        program.walk(&mut replacer);
+        program.walk_mut(&mut replacer);
 
         (program.0.instructions, replacer.get_frame_size())
     }
