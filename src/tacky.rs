@@ -1,4 +1,4 @@
-use crate::ast::{Expression, FunctionDefinition, Statement, UnaryOp};
+use crate::ast::{BinaryOp, Expression, FunctionDefinition, Statement, UnaryOp};
 use crate::tacky::Instruction::Unary;
 use anyhow::Result;
 
@@ -21,6 +21,12 @@ pub enum Instruction {
         src: Value,
         dst: Value,
     },
+    Binary {
+        op: BinaryOperator,
+        src1: Value,
+        src2: Value,
+        dst: Value,
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -33,6 +39,15 @@ pub enum Value {
 pub enum UnaryOperator {
     Complement,
     Negate,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum BinaryOperator {
+    Add,
+    Subtract,
+    Multiply,
+    Divide,
+    Remainder,
 }
 
 #[derive(Debug, Clone)]
@@ -89,8 +104,24 @@ impl TackyEmitter {
                 });
                 dst
             }
-            Expression::BinaryExpr(_, _, _) => {
-                unimplemented!("Binary expressions are not implemented yet")
+            Expression::BinaryExpr(op, left, right) => {
+                let src1 = self.emit_expression(left, instructions);
+                let src2 = self.emit_expression(right, instructions);
+                let dst = Value::Variable(self.make_temp_var());
+                let op = match op {
+                    BinaryOp::Add => BinaryOperator::Add,
+                    BinaryOp::Subtract => BinaryOperator::Subtract,
+                    BinaryOp::Multiply => BinaryOperator::Multiply,
+                    BinaryOp::Divide => BinaryOperator::Divide,
+                    BinaryOp::Remainder => BinaryOperator::Remainder,
+                };
+                instructions.push(Instruction::Binary {
+                    op,
+                    src1,
+                    src2,
+                    dst: dst.clone(),
+                });
+                dst
             }
         }
     }
@@ -144,6 +175,44 @@ mod tests {
         ];
         let actual = emitter.emit_statement(&stmt);
 
+        assert_eq!(expected, actual);
+    }
+
+    #[test]
+    fn emit_binary_expr() {
+        use BinaryOperator::*;
+        use Expression::*;
+        use Instruction::*;
+        use Value::*;
+
+        let mut emitter = TackyEmitter::new();
+        let stmt = Statement::Return(BinaryExpr(
+            BinaryOp::Add,
+            Box::new(Expression::IntegerConstant(1)),
+            Box::new(BinaryExpr(
+                BinaryOp::Multiply,
+                Box::new(Expression::IntegerConstant(2)),
+                Box::new(Expression::IntegerConstant(3)),
+            )),
+        ));
+
+        let expected = vec![
+            Binary {
+                op: Multiply,
+                src1: Value::IntegerConstant(2),
+                src2: Value::IntegerConstant(3),
+                dst: Variable("tmp.0".to_string()),
+            },
+            Binary {
+                op: Add,
+                src1: Value::IntegerConstant(1),
+                src2: Variable("tmp.0".to_string()),
+                dst: Variable("tmp.1".to_string()),
+            },
+            Return(Variable("tmp.1".to_string())),
+        ];
+
+        let actual = emitter.emit_statement(&stmt);
         assert_eq!(expected, actual);
     }
 }

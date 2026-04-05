@@ -54,6 +54,7 @@ impl AssemblyCreator {
                     });
 
                 }
+                _ => todo!("Unsupported instruction: {:?}", instruction),
             }
         }
 
