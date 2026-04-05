@@ -88,6 +88,7 @@ impl Visitor for CodeGenerator {
             Instruction::AllocateStack(size) => {
                 self.write_instruction(&format!("subq \t${size}, %rsp"));
             }
+            _ => todo!("handle other instruction types if needed"),
         }
     }
 }

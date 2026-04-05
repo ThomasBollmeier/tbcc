@@ -51,7 +51,20 @@ impl VisitorMut for PseudoRegReplacer {
                     *operand = new_operand;
                 }
             }
-            AllocateStack(_) | Ret => {}
+            Binary { left, right, .. } => {
+                if let Some(new_left) = self.replace_operand(left) {
+                    *left = new_left;
+                }
+                if let Some(new_right) = self.replace_operand(right) {
+                    *right = new_right;
+                }
+            }
+            Idiv(operand) => {
+                if let Some(new_operand) = self.replace_operand(operand) {
+                    *operand = new_operand;
+                }
+            }
+            Cdq | AllocateStack(_) | Ret => {}
         }
     }
 }

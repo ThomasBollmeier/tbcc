@@ -63,6 +63,9 @@ impl FuncDef {
 pub enum Instruction {
     Mov { src: Operand, dst: Operand },
     Unary { op: UnaryOp, operand: Operand },
+    Binary { op: BinaryOp, left: Operand, right: Operand },
+    Idiv(Operand),
+    Cdq,
     AllocateStack(i32),
     Ret,
 }
@@ -76,6 +79,13 @@ pub enum Operand {
 }
 
 #[derive(Debug, Clone, PartialEq)]
+pub enum BinaryOp {
+    Add,
+    Sub,
+    Mul,
+}
+
+#[derive(Debug, Clone, PartialEq)]
 pub enum UnaryOp {
     Neg,
     Not,
@@ -84,7 +94,9 @@ pub enum UnaryOp {
 #[derive(Debug, Clone, PartialEq)]
 pub enum Register {
     AX,
+    DX,
     R10,
+    R11,
 }
 
 #[allow(unused_variables)]
