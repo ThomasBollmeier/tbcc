@@ -48,6 +48,11 @@ pub enum BinaryOperator {
     Multiply,
     Divide,
     Remainder,
+    BitAnd,
+    BitOr,
+    BitXor,
+    ShiftLeft,
+    ShiftRight,
 }
 
 #[derive(Debug, Clone)]
@@ -114,6 +119,11 @@ impl TackyEmitter {
                     BinaryOp::Multiply => BinaryOperator::Multiply,
                     BinaryOp::Divide => BinaryOperator::Divide,
                     BinaryOp::Remainder => BinaryOperator::Remainder,
+                    BinaryOp::BitAnd => BinaryOperator::BitAnd,
+                    BinaryOp::BitOr => BinaryOperator::BitOr,
+                    BinaryOp::BitXor => BinaryOperator::BitXor,
+                    BinaryOp::ShiftLeft => BinaryOperator::ShiftLeft,
+                    BinaryOp::ShiftRight => BinaryOperator::ShiftRight,
                 };
                 instructions.push(Instruction::Binary {
                     op,
@@ -210,6 +220,62 @@ mod tests {
                 dst: Variable("tmp.1".to_string()),
             },
             Return(Variable("tmp.1".to_string())),
+        ];
+
+        let actual = emitter.emit_statement(&stmt);
+        assert_eq!(expected, actual);
+    }
+
+    #[test]
+    fn emit_shift_left_expr() {
+        use BinaryOperator::*;
+        use Expression::*;
+        use Instruction::*;
+        use Value::*;
+
+        let mut emitter = TackyEmitter::new();
+        let stmt = Statement::Return(BinaryExpr(
+            BinaryOp::ShiftLeft,
+            Box::new(Expression::IntegerConstant(8)),
+            Box::new(Expression::IntegerConstant(2)),
+        ));
+
+        let expected = vec![
+            Binary {
+                op: ShiftLeft,
+                src1: Value::IntegerConstant(8),
+                src2: Value::IntegerConstant(2),
+                dst: Variable("tmp.0".to_string()),
+            },
+            Return(Variable("tmp.0".to_string())),
+        ];
+
+        let actual = emitter.emit_statement(&stmt);
+        assert_eq!(expected, actual);
+    }
+
+    #[test]
+    fn emit_shift_right_expr() {
+        use BinaryOperator::*;
+        use Expression::*;
+        use Instruction::*;
+        use Value::*;
+
+        let mut emitter = TackyEmitter::new();
+        let stmt = Statement::Return(BinaryExpr(
+            BinaryOp::ShiftRight,
+            Box::new(Expression::IntegerConstant(16)),
+            Box::new(Expression::IntegerConstant(1)),
+        ));
+
+        let expected = vec![
+            Binary {
+                op: ShiftRight,
+                src1: Value::IntegerConstant(16),
+                src2: Value::IntegerConstant(1),
+                dst: Variable("tmp.0".to_string()),
+            },
+            Return(Variable("tmp.0".to_string())),
         ];
 
         let actual = emitter.emit_statement(&stmt);

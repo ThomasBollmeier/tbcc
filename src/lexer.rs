@@ -57,6 +57,11 @@ impl Lexer {
         lexer.add_token_type(TokenType::Asterisk, r"^\*");
         lexer.add_token_type(TokenType::Slash, r"^/");
         lexer.add_token_type(TokenType::Percent, r"^%");
+        lexer.add_token_type(TokenType::BitAnd, r"^&");
+        lexer.add_token_type(TokenType::BitOr, r"^\|");
+        lexer.add_token_type(TokenType::BitXor, r"^\^");
+        lexer.add_token_type(TokenType::ShiftLeft, r"^<<");
+        lexer.add_token_type(TokenType::ShiftRight, r"^>>");
 
         lexer.keywords.insert("int".to_string(), TokenType::Int);
         lexer.keywords.insert("void".to_string(), TokenType::Void);
@@ -272,6 +277,38 @@ int main(void) {
         assert_eq!(tokens[8].lexeme, "e");
         assert_eq!(tokens[9].token_type, TokenType::Percent);
         assert_eq!(tokens[9].lexeme, "%");
+        assert_eq!(tokens[10].token_type, TokenType::Identifier);
+        assert_eq!(tokens[10].lexeme, "f");
+    }
+
+    #[test]
+    fn scan_bitwise_operators() {
+        let lexer = Lexer::new();
+        let code = "a & b | c ^ d << e >> f";
+
+        let tokens = lexer.scan_tokens(code).unwrap();
+
+        assert_eq!(tokens.len(), 11);
+        assert_eq!(tokens[0].token_type, TokenType::Identifier);
+        assert_eq!(tokens[0].lexeme, "a");
+        assert_eq!(tokens[1].token_type, TokenType::BitAnd);
+        assert_eq!(tokens[1].lexeme, "&");
+        assert_eq!(tokens[2].token_type, TokenType::Identifier);
+        assert_eq!(tokens[2].lexeme, "b");
+        assert_eq!(tokens[3].token_type, TokenType::BitOr);
+        assert_eq!(tokens[3].lexeme, "|");
+        assert_eq!(tokens[4].token_type, TokenType::Identifier);
+        assert_eq!(tokens[4].lexeme, "c");
+        assert_eq!(tokens[5].token_type, TokenType::BitXor);
+        assert_eq!(tokens[5].lexeme, "^");
+        assert_eq!(tokens[6].token_type, TokenType::Identifier);
+        assert_eq!(tokens[6].lexeme, "d");
+        assert_eq!(tokens[7].token_type, TokenType::ShiftLeft);
+        assert_eq!(tokens[7].lexeme, "<<");
+        assert_eq!(tokens[8].token_type, TokenType::Identifier);
+        assert_eq!(tokens[8].lexeme, "e");
+        assert_eq!(tokens[9].token_type, TokenType::ShiftRight);
+        assert_eq!(tokens[9].lexeme, ">>");
         assert_eq!(tokens[10].token_type, TokenType::Identifier);
         assert_eq!(tokens[10].lexeme, "f");
     }

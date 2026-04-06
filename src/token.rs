@@ -19,6 +19,11 @@ pub enum TokenType {
     Asterisk,
     Slash,
     Percent,
+    BitAnd,
+    BitOr,
+    BitXor,
+    ShiftLeft,
+    ShiftRight,
 }
 
 #[derive(Debug, Clone, PartialEq)]

@@ -67,6 +67,11 @@ pub enum BinaryOp {
     Multiply,
     Divide,
     Remainder,
+    BitAnd,
+    BitOr,
+    BitXor,
+    ShiftLeft,
+    ShiftRight,
 }
 
 pub trait Visitor<A> {

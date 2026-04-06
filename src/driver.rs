@@ -46,9 +46,8 @@ pub fn compile(options: &Options) -> Result<()> {
 
     if !options.dont_assemble {
         create_exec_file(&assembly_file)?;
+        remove_file(&assembly_file)?;
     }
-
-    remove_file(&assembly_file)?;
 
     Ok(())
 }

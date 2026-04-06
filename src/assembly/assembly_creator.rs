@@ -149,6 +149,11 @@ impl AssemblyCreator {
             Add => crate::assembly::ast::BinaryOp::Add,
             Subtract => crate::assembly::ast::BinaryOp::Sub,
             Multiply => crate::assembly::ast::BinaryOp::Mul,
+            BitAnd => crate::assembly::ast::BinaryOp::BitAnd,
+            BitOr => crate::assembly::ast::BinaryOp::BitOr,
+            BitXor => crate::assembly::ast::BinaryOp::BitXor,
+            ShiftLeft => crate::assembly::ast::BinaryOp::ShiftLeft,
+            ShiftRight => crate::assembly::ast::BinaryOp::ShiftRight,
             Divide => unreachable!(),
             Remainder => unreachable!(),
         }
@@ -171,7 +176,7 @@ mod tests {
 
     #[test]
     fn creates_asm_program_ok() {
-        let code = "int main(void) { return 42; }";
+        let code = "int main(void) { return 42 >> 1; }";
 
         let lexer = Lexer::new();
         let tokens = lexer.scan_tokens(code).expect("Failed to scan tokens");

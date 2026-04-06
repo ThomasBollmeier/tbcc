@@ -54,20 +54,37 @@ impl VisitorMut for InstructionFixer {
                             new_instructions.push(instruction.clone());
                         }
                     }
-                    Add | Sub => match (left, right) {
-                        (Stack(_), Stack(_)) => {
+                    ShiftLeft | ShiftRight => {
+                        if let Stack(_) = left {
                             new_instructions.push(Mov {
                                 src: left.clone(),
-                                dst: Register(R10),
+                                dst: Register(CX),
                             });
                             new_instructions.push(Binary {
                                 op: op.clone(),
-                                left: Register(R10),
+                                left: Register(CX),
                                 right: right.clone(),
                             });
+                        } else {
+                            new_instructions.push(instruction.clone());
                         }
-                        _ => new_instructions.push(instruction.clone()),
-                    },
+                    }
+                    Add | Sub | BitAnd | BitOr | BitXor =>  {
+                        match (left, right) {
+                            (Stack(_), Stack(_)) => {
+                                new_instructions.push(Mov {
+                                    src: left.clone(),
+                                    dst: Register(R10),
+                                });
+                                new_instructions.push(Binary {
+                                    op: op.clone(),
+                                    left: Register(R10),
+                                    right: right.clone(),
+                                });
+                            }
+                            _ => new_instructions.push(instruction.clone()),
+                        }
+                    }
                 },
                 Idiv(op) => match op {
                     Immediate(_) => {

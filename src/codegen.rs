@@ -1,4 +1,6 @@
-use crate::assembly::ast::{BinaryOp, FuncDef, Instruction, Operand, Program, Register, UnaryOp, Visitor};
+use crate::assembly::ast::{
+    BinaryOp, FuncDef, Instruction, Operand, Program, Register, UnaryOp, Visitor,
+};
 
 pub struct CodeGenerator {
     code: String,
@@ -32,6 +34,7 @@ impl CodeGenerator {
         match operand {
             Operand::Immediate(imm) => format!("${}", imm),
             Operand::Register(Register::AX) => "%eax".to_string(),
+            Operand::Register(Register::CX) => "%ecx".to_string(),
             Operand::Register(Register::DX) => "%edx".to_string(),
             Operand::Register(Register::R10) => "%r10d".to_string(),
             Operand::Register(Register::R11) => "%r11d".to_string(),
@@ -52,6 +55,11 @@ impl CodeGenerator {
             BinaryOp::Add => "addl".to_string(),
             BinaryOp::Sub => "subl".to_string(),
             BinaryOp::Mul => "imull".to_string(),
+            BinaryOp::BitAnd => "andl".to_string(),
+            BinaryOp::BitOr => "orl".to_string(),
+            BinaryOp::BitXor => "xorl".to_string(),
+            BinaryOp::ShiftLeft => "shll".to_string(),
+            BinaryOp::ShiftRight => "sarl".to_string(),
         }
     }
 }

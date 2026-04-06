@@ -83,6 +83,11 @@ pub enum BinaryOp {
     Add,
     Sub,
     Mul,
+    BitAnd,
+    BitOr,
+    BitXor,
+    ShiftLeft,
+    ShiftRight,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -94,6 +99,7 @@ pub enum UnaryOp {
 #[derive(Debug, Clone, PartialEq)]
 pub enum Register {
     AX,
+    CX,
     DX,
     R10,
     R11,

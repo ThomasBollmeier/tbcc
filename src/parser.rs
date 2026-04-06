@@ -78,12 +78,21 @@ impl Parser {
             TokenType::Asterisk => Some(BinaryOp::Multiply),
             TokenType::Slash => Some(BinaryOp::Divide),
             TokenType::Percent => Some(BinaryOp::Remainder),
+            TokenType::BitAnd => Some(BinaryOp::BitAnd),
+            TokenType::BitOr => Some(BinaryOp::BitOr),
+            TokenType::BitXor => Some(BinaryOp::BitXor),
+            TokenType::ShiftLeft => Some(BinaryOp::ShiftLeft),
+            TokenType::ShiftRight => Some(BinaryOp::ShiftRight),
             _ => None,
         }
     }
 
     fn get_precedence(&self, binary_op: &BinaryOp) -> i32 {
         match binary_op {
+            BinaryOp::BitOr => 25,
+            BinaryOp::BitXor => 30,
+            BinaryOp::BitAnd => 35,
+            BinaryOp::ShiftLeft | BinaryOp::ShiftRight => 40,
             BinaryOp::Add | BinaryOp::Subtract => 45,
             BinaryOp::Multiply | BinaryOp::Divide | BinaryOp::Remainder => 50,
         }
@@ -162,7 +171,7 @@ mod tests {
     }
 
     #[test]
-    fn parse_bitwise() {
+    fn parse_complement() {
         let code = r#"
         int main(void) {
             return ~12;
@@ -176,6 +185,15 @@ mod tests {
         let code = r#"
         int main(void) {
             return 1 + 2 * 3;
+        }"#;
+        parse_code(code, true);
+    }
+
+    #[test]
+    fn parse_bitwise()  {
+        let code = r#"
+        int main(void) {
+            return 1 | 2 & 3 ^ 4 << 1 >> 2;
         }"#;
         parse_code(code, true);
     }
