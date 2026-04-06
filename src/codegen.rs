@@ -1,4 +1,4 @@
-use crate::assembly::ast::{FuncDef, Instruction, Operand, Program, Register, UnaryOp, Visitor};
+use crate::assembly::ast::{BinaryOp, FuncDef, Instruction, Operand, Program, Register, UnaryOp, Visitor};
 
 pub struct CodeGenerator {
     code: String,
@@ -32,7 +32,9 @@ impl CodeGenerator {
         match operand {
             Operand::Immediate(imm) => format!("${}", imm),
             Operand::Register(Register::AX) => "%eax".to_string(),
+            Operand::Register(Register::DX) => "%edx".to_string(),
             Operand::Register(Register::R10) => "%r10d".to_string(),
+            Operand::Register(Register::R11) => "%r11d".to_string(),
             Operand::Stack(offset) => format!("{}(%rbp)", offset),
             _ => panic!("Unsupported operand type: {:?}", operand),
         }
@@ -42,6 +44,14 @@ impl CodeGenerator {
         match unary_op {
             UnaryOp::Neg => "negl".to_string(),
             UnaryOp::Not => "notl".to_string(),
+        }
+    }
+
+    fn binary_op_to_string(&self, binary_op: &BinaryOp) -> String {
+        match binary_op {
+            BinaryOp::Add => "addl".to_string(),
+            BinaryOp::Sub => "subl".to_string(),
+            BinaryOp::Mul => "imull".to_string(),
         }
     }
 }
@@ -85,10 +95,20 @@ impl Visitor for CodeGenerator {
                 let operand_str = self.operand_to_string(operand);
                 self.write_instruction(&format!("{op_str} \t{operand_str}"));
             }
+            Instruction::Binary { op, left, right } => {
+                let op_str = self.binary_op_to_string(op);
+                let left_str = self.operand_to_string(left);
+                let right_str = self.operand_to_string(right);
+                self.write_instruction(&format!("{op_str} \t{left_str}, {right_str}"));
+            }
+            Instruction::Idiv(operand) => {
+                let operand_str = self.operand_to_string(operand);
+                self.write_instruction(&format!("idivl \t{operand_str}"));
+            }
+            Instruction::Cdq => self.write_instruction("cdq"),
             Instruction::AllocateStack(size) => {
                 self.write_instruction(&format!("subq \t${size}, %rsp"));
             }
-            _ => todo!("handle other instruction types if needed"),
         }
     }
 }

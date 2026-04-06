@@ -12,7 +12,7 @@ impl InstructionFixer {
 
 impl VisitorMut for InstructionFixer {
     fn enter_func_def(&mut self, func_def: &mut crate::assembly::ast::FuncDef) {
-        use crate::assembly::ast::{Instruction::*, Operand::*, Register::*};
+        use crate::assembly::ast::{BinaryOp::*, Instruction::*, Operand::*, Register::*};
 
         let mut new_instructions = vec![];
 
@@ -31,6 +31,51 @@ impl VisitorMut for InstructionFixer {
                             src: Register(R10),
                             dst: dst.clone(),
                         });
+                    }
+                    _ => new_instructions.push(instruction.clone()),
+                },
+                Binary { op, left, right } => match op {
+                    Mul => {
+                        if let Stack(_) = right {
+                            new_instructions.push(Mov {
+                                src: right.clone(),
+                                dst: Register(R11),
+                            });
+                            new_instructions.push(Binary {
+                                op: Mul,
+                                left: left.clone(),
+                                right: Register(R11),
+                            });
+                            new_instructions.push(Mov {
+                                src: Register(R11),
+                                dst: right.clone(),
+                            });
+                        } else {
+                            new_instructions.push(instruction.clone());
+                        }
+                    }
+                    Add | Sub => match (left, right) {
+                        (Stack(_), Stack(_)) => {
+                            new_instructions.push(Mov {
+                                src: left.clone(),
+                                dst: Register(R10),
+                            });
+                            new_instructions.push(Binary {
+                                op: op.clone(),
+                                left: Register(R10),
+                                right: right.clone(),
+                            });
+                        }
+                        _ => new_instructions.push(instruction.clone()),
+                    },
+                },
+                Idiv(op) => match op {
+                    Immediate(_) => {
+                        new_instructions.push(Mov {
+                            src: op.clone(),
+                            dst: Register(R10),
+                        });
+                        new_instructions.push(Idiv(Register(R10)));
                     }
                     _ => new_instructions.push(instruction.clone()),
                 },
