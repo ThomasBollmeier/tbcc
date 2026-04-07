@@ -24,6 +24,15 @@ pub enum TokenType {
     BitXor,
     ShiftLeft,
     ShiftRight,
+    LogicalAnd,
+    LogicalOr,
+    LogicalNot,
+    Equal,
+    NotEqual,
+    Less,
+    LessEqual,
+    Greater,
+    GreaterEqual,
 }
 
 #[derive(Debug, Clone, PartialEq)]

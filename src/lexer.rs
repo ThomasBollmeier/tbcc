@@ -25,18 +25,18 @@ impl Lexer {
             keywords: HashMap::new(),
         };
 
-        lexer.add_token_type_full(TokenType::Whitespace, r"^\s+", true, None);
+        lexer.add_token_type_full(TokenType::Whitespace, r"\s+", true, None);
 
         lexer.add_token_type_full(
             TokenType::Identifier,
-            r"^[a-zA-Z_][a-zA-Z0-9_]*\b",
+            r"[a-zA-Z_][a-zA-Z0-9_]*\b",
             false,
             None,
         );
 
         lexer.add_token_type_full(
             TokenType::IntegerConstant,
-            r"^\d+\b",
+            r"\d+\b",
             false,
             Some(|lexeme| {
                 let value = lexeme.parse::<i32>().unwrap();
@@ -44,24 +44,33 @@ impl Lexer {
             }),
         );
 
-        lexer.add_token_type(TokenType::LeftParen, r"^\(");
-        lexer.add_token_type(TokenType::RightParen, r"^\)");
-        lexer.add_token_type(TokenType::LeftBrace, r"^\{");
-        lexer.add_token_type(TokenType::RightBrace, r"^\}");
-        lexer.add_token_type(TokenType::Comma, r"^,");
-        lexer.add_token_type(TokenType::Semicolon, r"^;");
-        lexer.add_token_type(TokenType::Minus, r"^\-");
-        lexer.add_token_type(TokenType::MinusMinus, r"^\-\-");
-        lexer.add_token_type(TokenType::Tilde, r"^~");
-        lexer.add_token_type(TokenType::Plus, r"^\+");
-        lexer.add_token_type(TokenType::Asterisk, r"^\*");
-        lexer.add_token_type(TokenType::Slash, r"^/");
-        lexer.add_token_type(TokenType::Percent, r"^%");
-        lexer.add_token_type(TokenType::BitAnd, r"^&");
-        lexer.add_token_type(TokenType::BitOr, r"^\|");
-        lexer.add_token_type(TokenType::BitXor, r"^\^");
-        lexer.add_token_type(TokenType::ShiftLeft, r"^<<");
-        lexer.add_token_type(TokenType::ShiftRight, r"^>>");
+        lexer.add_token_type(TokenType::LeftParen, r"\(");
+        lexer.add_token_type(TokenType::RightParen, r"\)");
+        lexer.add_token_type(TokenType::LeftBrace, r"\{");
+        lexer.add_token_type(TokenType::RightBrace, r"\}");
+        lexer.add_token_type(TokenType::Comma, r",");
+        lexer.add_token_type(TokenType::Semicolon, r";");
+        lexer.add_token_type(TokenType::Minus, r"\-");
+        lexer.add_token_type(TokenType::MinusMinus, r"\-\-");
+        lexer.add_token_type(TokenType::Tilde, r"~");
+        lexer.add_token_type(TokenType::Plus, r"\+");
+        lexer.add_token_type(TokenType::Asterisk, r"\*");
+        lexer.add_token_type(TokenType::Slash, r"/");
+        lexer.add_token_type(TokenType::Percent, r"%");
+        lexer.add_token_type(TokenType::BitAnd, r"&");
+        lexer.add_token_type(TokenType::BitOr, r"\|");
+        lexer.add_token_type(TokenType::BitXor, r"\^");
+        lexer.add_token_type(TokenType::ShiftLeft, r"<<");
+        lexer.add_token_type(TokenType::ShiftRight, r">>");
+        lexer.add_token_type(TokenType::LogicalAnd, r"&&");
+        lexer.add_token_type(TokenType::LogicalOr, r"\|\|");
+        lexer.add_token_type(TokenType::LogicalNot, r"!");
+        lexer.add_token_type(TokenType::Equal, r"==");
+        lexer.add_token_type(TokenType::NotEqual, r"!=");
+        lexer.add_token_type(TokenType::GreaterEqual, r">=");
+        lexer.add_token_type(TokenType::Greater, r">");
+        lexer.add_token_type(TokenType::Less, r"<");
+        lexer.add_token_type(TokenType::LessEqual, r"<=");
 
         lexer.keywords.insert("int".to_string(), TokenType::Int);
         lexer.keywords.insert("void".to_string(), TokenType::Void);
@@ -123,6 +132,12 @@ impl Lexer {
         skip: bool,
         value_fn_opt: Option<ValueFn>,
     ) {
+        let pattern = if pattern.starts_with("^") {
+            pattern
+        } else {
+            &format!("^{}", pattern)
+        };
+
         let token_type_data = TokenTypeData {
             token_type,
             regex: Regex::new(pattern).unwrap(),
@@ -311,6 +326,28 @@ int main(void) {
         assert_eq!(tokens[9].lexeme, ">>");
         assert_eq!(tokens[10].token_type, TokenType::Identifier);
         assert_eq!(tokens[10].lexeme, "f");
+    }
+
+    #[test]
+    fn scan_logical_operators() {
+        let lexer = Lexer::new();
+        let code = "a && b || !c";
+
+        let tokens = lexer.scan_tokens(code).unwrap();
+
+        assert_eq!(tokens.len(), 6);
+        assert_eq!(tokens[0].token_type, TokenType::Identifier);
+        assert_eq!(tokens[0].lexeme, "a");
+        assert_eq!(tokens[1].token_type, TokenType::LogicalAnd);
+        assert_eq!(tokens[1].lexeme, "&&");
+        assert_eq!(tokens[2].token_type, TokenType::Identifier);
+        assert_eq!(tokens[2].lexeme, "b");
+        assert_eq!(tokens[3].token_type, TokenType::LogicalOr);
+        assert_eq!(tokens[3].lexeme, "||");
+        assert_eq!(tokens[4].token_type, TokenType::LogicalNot);
+        assert_eq!(tokens[4].lexeme, "!");
+        assert_eq!(tokens[5].token_type, TokenType::Identifier);
+        assert_eq!(tokens[5].lexeme, "c");
     }
 
 }
