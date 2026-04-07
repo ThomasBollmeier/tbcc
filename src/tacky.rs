@@ -101,6 +101,7 @@ impl TackyEmitter {
                 let op = match op {
                     UnaryOp::Complement => UnaryOperator::Complement,
                     UnaryOp::Negate => UnaryOperator::Negate,
+                    _ => todo!("unimplemented unary operator"),
                 };
                 instructions.push(Unary {
                     op,
@@ -124,6 +125,7 @@ impl TackyEmitter {
                     BinaryOp::BitXor => BinaryOperator::BitXor,
                     BinaryOp::ShiftLeft => BinaryOperator::ShiftLeft,
                     BinaryOp::ShiftRight => BinaryOperator::ShiftRight,
+                    _ => todo!("unimplemented binary operator"),
                 };
                 instructions.push(Instruction::Binary {
                     op,

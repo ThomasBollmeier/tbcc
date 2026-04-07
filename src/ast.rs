@@ -58,6 +58,7 @@ impl Expression {
 pub enum UnaryOp {
     Negate,
     Complement,
+    Not
 }
 
 #[derive(Debug, Clone)]
@@ -72,6 +73,14 @@ pub enum BinaryOp {
     BitXor,
     ShiftLeft,
     ShiftRight,
+    LogicalAnd,
+    LogicalOr,
+    Equal,
+    NotEqual,
+    Greater,
+    Less,
+    GreaterEqual,
+    LessEqual,
 }
 
 pub trait Visitor<A> {

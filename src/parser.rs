@@ -83,18 +83,31 @@ impl Parser {
             TokenType::BitXor => Some(BinaryOp::BitXor),
             TokenType::ShiftLeft => Some(BinaryOp::ShiftLeft),
             TokenType::ShiftRight => Some(BinaryOp::ShiftRight),
+            TokenType::LogicalAnd => Some(BinaryOp::LogicalAnd),
+            TokenType::LogicalOr => Some(BinaryOp::LogicalOr),
+            TokenType::Equal => Some(BinaryOp::Equal),
+            TokenType::NotEqual => Some(BinaryOp::NotEqual),
+            TokenType::Greater => Some(BinaryOp::Greater),
+            TokenType::Less => Some(BinaryOp::Less),
+            TokenType::GreaterEqual => Some(BinaryOp::GreaterEqual),
+            TokenType::LessEqual => Some(BinaryOp::LessEqual),
             _ => None,
         }
     }
 
     fn get_precedence(&self, binary_op: &BinaryOp) -> i32 {
+        use BinaryOp::*;
         match binary_op {
-            BinaryOp::BitOr => 25,
-            BinaryOp::BitXor => 30,
-            BinaryOp::BitAnd => 35,
-            BinaryOp::ShiftLeft | BinaryOp::ShiftRight => 40,
-            BinaryOp::Add | BinaryOp::Subtract => 45,
-            BinaryOp::Multiply | BinaryOp::Divide | BinaryOp::Remainder => 50,
+            LogicalOr => 15,
+            LogicalAnd => 20,
+            BitOr => 25,
+            BitXor => 30,
+            BitAnd => 35,
+            Equal | NotEqual => 36,
+            Greater | Less | GreaterEqual | LessEqual => 37,
+            ShiftLeft | ShiftRight => 40,
+            Add | Subtract => 45,
+            Multiply | Divide | Remainder => 50,
         }
     }
 
@@ -108,11 +121,12 @@ impl Parser {
                     Err(anyhow!("Expected integer constant value"))
                 }
             }
-            TokenType::Minus | TokenType::Tilde => {
-                let op = if token.token_type == TokenType::Minus {
-                    UnaryOp::Negate
-                } else {
-                    UnaryOp::Complement
+            TokenType::Minus | TokenType::Tilde | TokenType::LogicalNot => {
+                let op = match token.token_type {
+                    TokenType::Minus => UnaryOp::Negate,
+                    TokenType::Tilde => UnaryOp::Complement,
+                    TokenType::LogicalNot => UnaryOp::Not,
+                    _ => unreachable!(),
                 };
                 Ok(Expression::UnaryExpr(op, Box::new(self.factor(stream)?)))
             }
