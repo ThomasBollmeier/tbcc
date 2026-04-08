@@ -122,6 +122,7 @@ impl AssemblyCreator {
                         right: dst_op,
                     });
                 }
+                _ => todo!("unsupported instruction {:?}", instruction),
             }
         }
 
@@ -140,6 +141,7 @@ impl AssemblyCreator {
         match unary_op {
             Negate => UnaryOp::Neg,
             Complement => UnaryOp::Not,
+            _ => todo!("unsupported unary operator {:?}", unary_op),
         }
     }
 
@@ -156,6 +158,7 @@ impl AssemblyCreator {
             ShiftRight => crate::assembly::ast::BinaryOp::ShiftRight,
             Divide => unreachable!(),
             Remainder => unreachable!(),
+            _ => todo!("unsupported binary operator {:?}", binary_op),
         }
     }
 }
