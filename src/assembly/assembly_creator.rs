@@ -1,7 +1,9 @@
-use crate::assembly::ast::{FuncDef, Instruction, Operand, Program, Register, UnaryOp};
+use crate::assembly::ast::{
+    ConditionCode, FuncDef, Instruction, Operand, Program, Register, UnaryOp,
+};
 use crate::tacky::{
-    BinaryOperator as TackyBinOp, FunctionDef, Instruction as TackyInstruction, UnaryOperator,
-    Value,
+    BinaryOperator as TackyBinOp, BinaryOperator, FunctionDef, Instruction as TackyInstruction,
+    UnaryOperator, Value,
 };
 
 #[derive(Debug)]
@@ -32,101 +34,272 @@ impl AssemblyCreator {
         &mut self,
         instructions: &Vec<TackyInstruction>,
     ) -> anyhow::Result<Vec<Instruction>> {
-        use crate::assembly::ast::Instruction::*;
         let mut ret = vec![];
 
         for instruction in instructions {
             match instruction {
-                TackyInstruction::Return(value) => {
-                    let src = self.create_operand(value);
-                    ret.push(Mov {
-                        src,
-                        dst: Operand::Register(Register::AX),
-                    });
-                    ret.push(Ret);
-                }
-                TackyInstruction::Unary { op, src, dst } => {
-                    let src_op = self.create_operand(src);
-                    let dst_op = self.create_operand(dst);
-                    let unary_op = self.map_unary_operator(op);
-
-                    ret.push(Mov {
-                        src: src_op,
-                        dst: dst_op.clone(),
-                    });
-                    ret.push(Unary {
-                        op: unary_op,
-                        operand: dst_op,
-                    });
-                }
+                TackyInstruction::Return(value) => self.push_return(&mut ret, value),
+                TackyInstruction::Unary {
+                    op: UnaryOperator::Not,
+                    src,
+                    dst,
+                } => self.push_unary_not(&mut ret, src, dst),
+                TackyInstruction::Unary { op, src, dst } => self.push_unary(&mut ret, op, src, dst),
                 TackyInstruction::Binary {
                     op: TackyBinOp::Divide,
                     src1,
                     src2,
                     dst,
-                } => {
-                    let src1_op = self.create_operand(src1);
-                    let src2_op = self.create_operand(src2);
-                    let dst_op = self.create_operand(dst);
-
-                    ret.push(Mov {
-                        src: src1_op,
-                        dst: Operand::Register(Register::AX),
-                    });
-                    ret.push(Cdq);
-                    ret.push(Idiv(src2_op));
-                    ret.push(Mov {
-                        src: Operand::Register(Register::AX),
-                        dst: dst_op,
-                    });
-                }
+                } => self.push_binary_divide(&mut ret, src1, src2, dst),
                 TackyInstruction::Binary {
                     op: TackyBinOp::Remainder,
                     src1,
                     src2,
                     dst,
-                } => {
-                    let src1_op = self.create_operand(src1);
-                    let src2_op = self.create_operand(src2);
-                    let dst_op = self.create_operand(dst);
-
-                    ret.push(Mov {
-                        src: src1_op,
-                        dst: Operand::Register(Register::AX),
-                    });
-                    ret.push(Cdq);
-                    ret.push(Idiv(src2_op));
-                    ret.push(Mov {
-                        src: Operand::Register(Register::DX),
-                        dst: dst_op,
-                    });
-                }
+                } => self.push_binary_remainder(&mut ret, src1, src2, dst),
                 TackyInstruction::Binary {
                     op,
                     src1,
                     src2,
                     dst,
-                } => {
-                    let src1_op = self.create_operand(src1);
-                    let src2_op = self.create_operand(src2);
-                    let dst_op = self.create_operand(dst);
-
-                    let binary_op = self.map_binary_operator(op);
-                    ret.push(Mov {
-                        src: src1_op,
-                        dst: dst_op.clone(),
-                    });
-                    ret.push(Binary {
-                        op: binary_op,
-                        left: src2_op,
-                        right: dst_op,
-                    });
+                } => self.push_binary(&mut ret, op, src1, src2, dst),
+                TackyInstruction::Jump { target } => self.push_jump(&mut ret, target),
+                TackyInstruction::JumpIfZero { condition, target } => {
+                    self.push_jump_if_zero(&mut ret, condition, target)
                 }
-                _ => todo!("unsupported instruction {:?}", instruction),
+                TackyInstruction::JumpIfNotZero { condition, target } => {
+                    self.push_jump_if_not_zero(&mut ret, condition, target)
+                }
+                TackyInstruction::Copy { src, dst } => self.push_copy(&mut ret, src, dst),
+                TackyInstruction::Label(name) => self.push_label(&mut ret, name),
             }
         }
 
         Ok(ret)
+    }
+
+    fn push_return(&mut self, instructions: &mut Vec<Instruction>, value: &Value) {
+        use crate::assembly::ast::Instruction::*;
+
+        let src = self.create_operand(value);
+        instructions.push(Mov {
+            src,
+            dst: Operand::Register(Register::AX),
+        });
+        instructions.push(Ret);
+    }
+
+    fn push_unary_not(&mut self, instructions: &mut Vec<Instruction>, src: &Value, dst: &Value) {
+        use crate::assembly::ast::Instruction::*;
+
+        let src_op = self.create_operand(src);
+        let dst_op = self.create_operand(dst);
+        instructions.push(Cmp {
+            op1: Operand::Immediate(0),
+            op2: src_op,
+        });
+        instructions.push(Mov {
+            src: Operand::Immediate(0),
+            dst: dst_op.clone(),
+        });
+        instructions.push(SetCC(ConditionCode::Eq, dst_op));
+    }
+
+    fn push_unary(
+        &mut self,
+        instructions: &mut Vec<Instruction>,
+        op: &UnaryOperator,
+        src: &Value,
+        dst: &Value,
+    ) {
+        use crate::assembly::ast::Instruction::*;
+
+        let src_op = self.create_operand(src);
+        let dst_op = self.create_operand(dst);
+        let unary_op = self.map_unary_operator(op);
+
+        instructions.push(Mov {
+            src: src_op,
+            dst: dst_op.clone(),
+        });
+        instructions.push(Unary {
+            op: unary_op,
+            operand: dst_op,
+        });
+    }
+
+    fn push_binary_divide(
+        &mut self,
+        instructions: &mut Vec<Instruction>,
+        src1: &Value,
+        src2: &Value,
+        dst: &Value,
+    ) {
+        use crate::assembly::ast::Instruction::*;
+
+        let src1_op = self.create_operand(src1);
+        let src2_op = self.create_operand(src2);
+        let dst_op = self.create_operand(dst);
+
+        instructions.push(Mov {
+            src: src1_op,
+            dst: Operand::Register(Register::AX),
+        });
+        instructions.push(Cdq);
+        instructions.push(Idiv(src2_op));
+        instructions.push(Mov {
+            src: Operand::Register(Register::AX),
+            dst: dst_op,
+        });
+    }
+
+    fn push_binary_remainder(
+        &mut self,
+        instructions: &mut Vec<Instruction>,
+        src1: &Value,
+        src2: &Value,
+        dst: &Value,
+    ) {
+        use crate::assembly::ast::Instruction::*;
+
+        let src1_op = self.create_operand(src1);
+        let src2_op = self.create_operand(src2);
+        let dst_op = self.create_operand(dst);
+
+        instructions.push(Mov {
+            src: src1_op,
+            dst: Operand::Register(Register::AX),
+        });
+        instructions.push(Cdq);
+        instructions.push(Idiv(src2_op));
+        instructions.push(Mov {
+            src: Operand::Register(Register::DX),
+            dst: dst_op,
+        });
+    }
+
+    fn push_binary(
+        &mut self,
+        instructions: &mut Vec<Instruction>,
+        op: &TackyBinOp,
+        src1: &Value,
+        src2: &Value,
+        dst: &Value,
+    ) {
+        match op {
+            BinaryOperator::Equal
+            | BinaryOperator::NotEqual
+            | BinaryOperator::Greater
+            | BinaryOperator::GreaterEqual
+            | BinaryOperator::Less
+            | BinaryOperator::LessEqual => {
+                self.push_binary_relational(instructions, op, src1, src2, dst)
+            }
+            _ => self.push_binary_arithmetic(instructions, op, src1, src2, dst),
+        }
+    }
+
+    fn push_binary_relational(
+        &mut self,
+        instructions: &mut Vec<Instruction>,
+        op: &TackyBinOp,
+        src1: &Value,
+        src2: &Value,
+        dst: &Value,
+    ) {
+        use crate::assembly::ast::Instruction::*;
+
+        let src1_op = self.create_operand(src1);
+        let src2_op = self.create_operand(src2);
+        let dst_op = self.create_operand(dst);
+
+        instructions.push(Cmp {
+            op1: src1_op,
+            op2: src2_op,
+        });
+        let condition_code = self.map_relational_operator(op);
+        instructions.push(Mov {
+            src: Operand::Immediate(0),
+            dst: dst_op.clone(),
+        });
+        instructions.push(SetCC(condition_code, dst_op));
+    }
+
+    fn push_binary_arithmetic(
+        &mut self,
+        instructions: &mut Vec<Instruction>,
+        op: &TackyBinOp,
+        src1: &Value,
+        src2: &Value,
+        dst: &Value,
+    ) {
+        use crate::assembly::ast::Instruction::*;
+
+        let src1_op = self.create_operand(src1);
+        let src2_op = self.create_operand(src2);
+        let dst_op = self.create_operand(dst);
+
+        let binary_op = self.map_binary_operator(op);
+        instructions.push(Mov {
+            src: src1_op,
+            dst: dst_op.clone(),
+        });
+        instructions.push(Binary {
+            op: binary_op,
+            left: src2_op,
+            right: dst_op,
+        });
+    }
+
+    fn push_jump(&mut self, instructions: &mut Vec<Instruction>, target: &str) {
+        instructions.push(Instruction::Jmp(target.to_string()));
+    }
+
+    fn push_jump_if_zero(
+        &mut self,
+        instructions: &mut Vec<Instruction>,
+        condition: &Value,
+        target: &str,
+    ) {
+        use crate::assembly::ast::Instruction::*;
+
+        let condition_op = self.create_operand(condition);
+        instructions.push(Cmp {
+            op1: Operand::Immediate(0),
+            op2: condition_op,
+        });
+        instructions.push(JmpCC(ConditionCode::Eq, target.to_string()));
+    }
+
+    fn push_jump_if_not_zero(
+        &mut self,
+        instructions: &mut Vec<Instruction>,
+        condition: &Value,
+        target: &str,
+    ) {
+        use crate::assembly::ast::Instruction::*;
+
+        let condition_op = self.create_operand(condition);
+        instructions.push(Cmp {
+            op1: Operand::Immediate(0),
+            op2: condition_op,
+        });
+        instructions.push(JmpCC(ConditionCode::NotEq, target.to_string()));
+    }
+
+    fn push_copy(&mut self, instructions: &mut Vec<Instruction>, src: &Value, dst: &Value) {
+        use crate::assembly::ast::Instruction::*;
+
+        let src_op = self.create_operand(src);
+        let dst_op = self.create_operand(dst);
+        instructions.push(Mov {
+            src: src_op,
+            dst: dst_op,
+        });
+    }
+
+    fn push_label(&mut self, instructions: &mut Vec<Instruction>, name: &str) {
+        instructions.push(Instruction::Label(name.to_string()));
     }
 
     fn create_operand(&mut self, value: &Value) -> Operand {
@@ -158,7 +331,20 @@ impl AssemblyCreator {
             ShiftRight => crate::assembly::ast::BinaryOp::ShiftRight,
             Divide => unreachable!(),
             Remainder => unreachable!(),
-            _ => todo!("unsupported binary operator {:?}", binary_op),
+            _ => unimplemented!("unsupported binary operator {:?}", binary_op),
+        }
+    }
+
+    fn map_relational_operator(&self, relational_op: &TackyBinOp) -> ConditionCode {
+        use crate::tacky::BinaryOperator::*;
+        match relational_op {
+            Equal => ConditionCode::Eq,
+            NotEqual => ConditionCode::NotEq,
+            Greater => ConditionCode::Gt,
+            GreaterEqual => ConditionCode::GtEq,
+            Less => ConditionCode::Lt,
+            LessEqual => ConditionCode::LtEq,
+            _ => unimplemented!("unsupported relational operator {:?}", relational_op),
         }
     }
 }

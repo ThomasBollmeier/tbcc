@@ -65,6 +65,21 @@ impl VisitorMut for PseudoRegReplacer {
                 }
             }
             Cdq | AllocateStack(_) | Ret => {}
+            Cmp { op1, op2 } => {
+                if let Some(new_op1) = self.replace_operand(op1) {
+                    *op1 = new_op1;
+                }
+                if let Some(new_op2) = self.replace_operand(op2) {
+                    *op2 = new_op2;
+                }
+            }
+            Jmp(_) | JmpCC(_, _) => {}
+            SetCC(_, operand) => {
+                if let Some(new_operand) = self.replace_operand(operand) {
+                    *operand = new_operand;
+                }
+            }
+            Label(_) => {}
         }
     }
 }

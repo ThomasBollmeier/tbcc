@@ -175,18 +175,18 @@ impl TackyEmitter {
 
                 result
             }
-            Expression::BinaryExpr(BinaryOp::LogicalOr, _left, _right) => {
+            Expression::BinaryExpr(BinaryOp::LogicalOr, left, right) => {
                 let end_label = self.make_label("or_end");
                 let true_label = self.make_label("or_true");
                 let result = Value::Variable(self.make_temp_var());
 
-                let val1 = self.emit_expression(_left, instructions);
+                let val1 = self.emit_expression(left, instructions);
                 instructions.push(Instruction::JumpIfNotZero {
                     condition: val1.clone(),
                     target: true_label.clone(),
                 });
 
-                let val2 = self.emit_expression(_right, instructions);
+                let val2 = self.emit_expression(right, instructions);
                 instructions.push(Instruction::JumpIfNotZero {
                     condition: val2.clone(),
                     target: true_label.clone(),

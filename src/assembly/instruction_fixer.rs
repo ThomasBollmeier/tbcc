@@ -96,6 +96,32 @@ impl VisitorMut for InstructionFixer {
                     }
                     _ => new_instructions.push(instruction.clone()),
                 },
+                Cmp {
+                    op1,
+                    op2
+                } => match (op1, op2) {
+                    (Stack(_), Stack(_)) => {
+                        new_instructions.push(Mov {
+                            src: op1.clone(),
+                            dst: Register(R10),
+                        });
+                        new_instructions.push(Cmp {
+                            op1: Register(R10),
+                            op2: op2.clone(),
+                        });
+                    }
+                    (_, Immediate(_)) => {
+                        new_instructions.push(Mov {
+                            src: op2.clone(),
+                            dst: Register(R11),
+                        });
+                        new_instructions.push(Cmp {
+                            op1: op1.clone(),
+                            op2: Register(R11),
+                        });
+                    }
+                    _ => new_instructions.push(instruction.clone()),
+                }
                 _ => new_instructions.push(instruction.clone()),
             }
         }

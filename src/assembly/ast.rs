@@ -64,10 +64,25 @@ pub enum Instruction {
     Mov { src: Operand, dst: Operand },
     Unary { op: UnaryOp, operand: Operand },
     Binary { op: BinaryOp, left: Operand, right: Operand },
+    Cmp { op1: Operand, op2: Operand },
     Idiv(Operand),
     Cdq,
+    Jmp(String),
+    JmpCC(ConditionCode, String),
+    SetCC(ConditionCode, Operand),
+    Label(String),
     AllocateStack(i32),
     Ret,
+}
+
+#[derive(Debug, Clone)]
+pub enum ConditionCode {
+    Eq,
+    NotEq,
+    Gt,
+    GtEq,
+    Lt,
+    LtEq,
 }
 
 #[derive(Debug, Clone)]
