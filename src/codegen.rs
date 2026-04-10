@@ -1,6 +1,4 @@
-use crate::assembly::ast::{
-    BinaryOp, FuncDef, Instruction, Operand, Program, Register, UnaryOp, Visitor,
-};
+use crate::assembly::ast::{BinaryOp, ConditionCode, FuncDef, Instruction, Operand, Program, Register, UnaryOp, Visitor};
 
 pub struct CodeGenerator {
     code: String,
@@ -43,6 +41,19 @@ impl CodeGenerator {
         }
     }
 
+    fn operand_1byte_to_string(&self, operand: &Operand) -> String {
+        match operand {
+            Operand::Immediate(imm) => format!("${}", imm),
+            Operand::Register(Register::AX) => "%al".to_string(),
+            Operand::Register(Register::CX) => "%cl".to_string(),
+            Operand::Register(Register::DX) => "%dl".to_string(),
+            Operand::Register(Register::R10) => "%r10b".to_string(),
+            Operand::Register(Register::R11) => "%r11b".to_string(),
+            Operand::Stack(offset) => format!("{}(%rbp)", offset),
+            _ => panic!("Unsupported operand type: {:?}", operand),
+        }
+    }
+
     fn unary_op_to_string(&self, unary_op: &UnaryOp) -> String {
         match unary_op {
             UnaryOp::Neg => "negl".to_string(),
@@ -60,6 +71,25 @@ impl CodeGenerator {
             BinaryOp::BitXor => "xorl".to_string(),
             BinaryOp::ShiftLeft => "shll".to_string(),
             BinaryOp::ShiftRight => "sarl".to_string(),
+        }
+    }
+
+    fn condition_code_to_suffix(&self, condition_code: &ConditionCode) -> String {
+        match condition_code {
+            ConditionCode::Eq => "e".to_string(),
+            ConditionCode::NotEq => "ne".to_string(),
+            ConditionCode::Gt => "g".to_string(),
+            ConditionCode::GtEq => "ge".to_string(),
+            ConditionCode::Lt => "l".to_string(),
+            ConditionCode::LtEq => "le".to_string(),
+        }
+    }
+
+    fn local_label(&self, label: &str) -> String {
+        if cfg!(target_os = "linux") {
+            format!(".L{}", label)
+        } else {
+            format!("L{}", label)
         }
     }
 }
@@ -117,7 +147,29 @@ impl Visitor for CodeGenerator {
             Instruction::AllocateStack(size) => {
                 self.write_instruction(&format!("subq \t${size}, %rsp"));
             }
-            _ => todo!("handle other instruction types"),
+            Instruction::Cmp { op1, op2 } => {
+                let op1_str = self.operand_to_string(op1);
+                let op2_str = self.operand_to_string(op2);
+                self.write_instruction(&format!("cmpl \t{op1_str}, {op2_str}"));
+            }
+            Instruction::Jmp(label) => {
+                let label = self.local_label(label);
+                self.write_instruction(&format!("jmp \t{label}"));
+            }
+            Instruction::JmpCC(condition_code, label) => {
+                let suffix = self.condition_code_to_suffix(condition_code);
+                let label = self.local_label(label);
+                self.write_instruction(&format!("j{suffix} \t{label}"));
+            }
+            Instruction::SetCC(condition_code, operand) => {
+                let suffix = self.condition_code_to_suffix(condition_code);
+                let operand_str = self.operand_1byte_to_string(operand);
+                self.write_instruction(&format!("set{suffix} \t{operand_str}"));
+            }
+            Instruction::Label(label) => {
+                let label = self.local_label(label);
+                self.write_label(&label);
+            }
         }
     }
 }
@@ -155,4 +207,33 @@ mod tests {
 
         print!("{asm_code}");
     }
+
+    #[test]
+    fn generates_asm_with_comparisons_and_jumps() {
+        let parser = Parser::new();
+        let lexer = Lexer::new();
+
+        let code = "int main(void) { return (1 < 2) && (3 != 4); }";
+
+        let tokens = lexer.scan_tokens(code).expect("Failed to scan tokens");
+        let program = parser.parse(tokens).expect("Failed to parse program");
+
+        let mut tacky_emitter = TackyEmitter::new();
+        let tacky_program = tacky_emitter
+            .emit_program(&program)
+            .expect("Failed to emit tacky program");
+
+        let assembly_program =
+            assembly::create_program(&tacky_program).expect("Failed to create assembly program");
+
+        let code_generator = CodeGenerator::new();
+        let asm_code = code_generator.generate_assembly(&assembly_program);
+
+        assert!(asm_code.contains("cmpl"), "Expected a compare instruction in ASM");
+        assert!(asm_code.contains("je \t"), "Expected a conditional jump (je) in ASM");
+        assert!(asm_code.contains("jmp \t"), "Expected an unconditional jump in ASM");
+        assert!(asm_code.contains("setl") || asm_code.contains("setne"), "Expected setcc for comparisons in ASM");
+    }
+
+
 }

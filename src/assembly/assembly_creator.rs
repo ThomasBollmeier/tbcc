@@ -214,8 +214,8 @@ impl AssemblyCreator {
         let dst_op = self.create_operand(dst);
 
         instructions.push(Cmp {
-            op1: src1_op,
-            op2: src2_op,
+            op1: src2_op,
+            op2: src1_op,
         });
         let condition_code = self.map_relational_operator(op);
         instructions.push(Mov {
