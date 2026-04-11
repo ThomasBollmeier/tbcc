@@ -33,6 +33,7 @@ pub enum TokenType {
     LessEqual,
     Greater,
     GreaterEqual,
+    Assign,
 }
 
 #[derive(Debug, Clone, PartialEq)]

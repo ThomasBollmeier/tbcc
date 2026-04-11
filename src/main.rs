@@ -6,7 +6,7 @@ fn main() {
     let options = Options::parse();
     let exit_code = match driver::compile(&options) {
         Ok(_) => 0,
-        Err(error    ) => {
+        Err(error) => {
             eprintln!("{}", error);
             1
         },

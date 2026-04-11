@@ -71,6 +71,7 @@ impl Lexer {
         lexer.add_token_type(TokenType::Greater, r">");
         lexer.add_token_type(TokenType::Less, r"<");
         lexer.add_token_type(TokenType::LessEqual, r"<=");
+        lexer.add_token_type(TokenType::Assign, r"=");
 
         lexer.keywords.insert("int".to_string(), TokenType::Int);
         lexer.keywords.insert("void".to_string(), TokenType::Void);
@@ -348,6 +349,22 @@ int main(void) {
         assert_eq!(tokens[4].lexeme, "!");
         assert_eq!(tokens[5].token_type, TokenType::Identifier);
         assert_eq!(tokens[5].lexeme, "c");
+    }
+
+    #[test]
+    fn scan_assignment() {
+        let lexer = Lexer::new();
+        let code = "a = b";
+
+        let tokens = lexer.scan_tokens(code).unwrap();
+        assert_eq!(tokens.len(), 3);
+
+        assert_eq!(tokens[0].token_type, TokenType::Identifier);
+        assert_eq!(tokens[0].lexeme, "a");
+        assert_eq!(tokens[1].token_type, TokenType::Assign);
+        assert_eq!(tokens[1].lexeme, "=");
+        assert_eq!(tokens[2].token_type, TokenType::Identifier);
+        assert_eq!(tokens[2].lexeme, "b");
     }
 
 }
