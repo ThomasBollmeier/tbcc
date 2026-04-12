@@ -1,5 +1,5 @@
 use crate::ast::Statement::Return;
-use crate::ast::{BinaryOp, Expression, FunctionDefinition, Program, Statement, UnaryOp};
+use crate::ast::{Associativity, BinaryOp, BlockItem, Declaration, Expression, FunctionDefinition, Program, Statement, UnaryOp};
 use crate::token::{Token, TokenStream, TokenType, TokenValue};
 use anyhow::{Result, anyhow};
 
@@ -37,14 +37,78 @@ impl Parser {
         self.expect(stream, TokenType::RightParen)?;
         self.expect(stream, TokenType::LeftBrace)?;
 
-        let body = self.statement(stream)?;
+        let body = self.body(stream)?;
 
         self.expect(stream, TokenType::RightBrace)?;
 
         Ok(FunctionDefinition::new(name, body))
     }
 
+    fn body(&self, stream: &mut TokenStream) -> Result<Vec<BlockItem>> {
+        let mut items = Vec::new();
+
+        while let Some(token) = stream.peek() {
+            match token.token_type {
+                TokenType::RightBrace => break,
+                TokenType::Int => {
+                    items.push(BlockItem::Declaration(self.declaration(stream)?));
+                }
+                _ => {
+                    items.push(BlockItem::Statement(self.statement(stream)?));
+                }
+            }
+        }
+
+        Ok(items)
+    }
+
+    fn declaration(&self, stream: &mut TokenStream) -> Result<Declaration> {
+        self.expect(stream, TokenType::Int)?;
+        let name_token = self.expect(stream, TokenType::Identifier)?;
+        let name = name_token.lexeme;
+
+        let init_expr = if let Some(token) = stream.peek() {
+            if token.token_type == TokenType::Assign {
+                stream.advance(); // consume '='
+                Some(self.expression(stream, 0)?)
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+
+        self.expect(stream, TokenType::Semicolon)?;
+
+        Ok(Declaration::new(name, init_expr))
+    }
+
     fn statement(&self, stream: &mut TokenStream) -> Result<Statement> {
+        let next_token = stream.peek();
+        match next_token {
+            Some(token) => {
+                match token.token_type {
+                    TokenType::Return => self.return_statement(stream),
+                    TokenType::Semicolon => self.null_statement(stream),
+                    _ => self.expression_statement(stream),
+                }
+            }
+            None => Err(anyhow!("Unexpected end of statement")),
+        }
+    }
+
+    fn expression_statement(&self, stream: &mut TokenStream) -> Result<Statement> {
+        let expr = self.expression(stream, 0)?;
+        self.expect(stream, TokenType::Semicolon)?;
+        Ok(Statement::Expression(expr))
+    }
+
+    fn null_statement(&self, stream: &mut TokenStream) -> Result<Statement> {
+        self.consume(stream)?; // consume the semicolon
+        Ok(Statement::Null)
+    }
+
+    fn return_statement(&self, stream: &mut TokenStream) -> Result<Statement> {
         self.expect(stream, TokenType::Return)?;
         let expr = self.expression(stream, 0)?;
         self.expect(stream, TokenType::Semicolon)?;
@@ -64,8 +128,19 @@ impl Parser {
                 break;
             }
             stream.advance(); // consume the operator
-            let right = self.expression(stream, prec + 1)?;
-            left = Expression::BinaryExpr(op, Box::new(left), Box::new(right));
+
+            let assoc = Associativity::from(&op);
+            let next_min_prec = match assoc {
+                Associativity::Left => prec + 1,
+                Associativity::Right => prec
+            };
+
+            let right = self.expression(stream, next_min_prec)?;
+            left = match op {
+                BinaryOp::Assign => Expression::Assignment(Box::new(left), Box::new(right)),
+                _ => Expression::BinaryExpr(op, Box::new(left), Box::new(right)),
+            };
+
         }
 
         Ok(left)
@@ -91,6 +166,7 @@ impl Parser {
             TokenType::Less => Some(BinaryOp::Less),
             TokenType::GreaterEqual => Some(BinaryOp::GreaterEqual),
             TokenType::LessEqual => Some(BinaryOp::LessEqual),
+            TokenType::Assign => Some(BinaryOp::Assign),
             _ => None,
         }
     }
@@ -98,6 +174,7 @@ impl Parser {
     fn get_precedence(&self, binary_op: &BinaryOp) -> i32 {
         use BinaryOp::*;
         match binary_op {
+            Assign => 1,
             LogicalOr => 15,
             LogicalAnd => 20,
             BitOr => 25,
@@ -120,6 +197,9 @@ impl Parser {
                 } else {
                     Err(anyhow!("Expected integer constant value"))
                 }
+            }
+            TokenType::Identifier => {
+                Ok(Expression::Var(token.lexeme))
             }
             TokenType::Minus | TokenType::Tilde | TokenType::LogicalNot => {
                 let op = match token.token_type {
@@ -208,6 +288,20 @@ mod tests {
         let code = r#"
         int main(void) {
             return 1 | 2 & 3 ^ 4 << 1 >> 2;
+        }"#;
+        parse_code(code, true);
+    }
+
+    #[test]
+    fn parse_variable() {
+        let code = r#"
+        int main(void) {
+            int x = 1;
+            int y = 2;
+            int z;
+            z = 3;
+            42;;
+            return x + y + z;
         }"#;
         parse_code(code, true);
     }

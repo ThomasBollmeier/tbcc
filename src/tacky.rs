@@ -1,4 +1,4 @@
-use crate::ast::{BinaryOp, Expression, FunctionDefinition, Statement, UnaryOp};
+use crate::ast::{BinaryOp, BlockItem, Expression, FunctionDefinition, Statement, UnaryOp};
 use crate::tacky::Instruction::Unary;
 use anyhow::Result;
 use std::collections::HashMap;
@@ -107,12 +107,28 @@ impl TackyEmitter {
         function_definition: &FunctionDefinition,
     ) -> Result<FunctionDef> {
         let name = function_definition.name.clone();
-        let instructions = self.emit_statement(&function_definition.body);
+        let instructions = self.emit_block(&function_definition.body);
 
         Ok(FunctionDef {
             name,
             body: instructions,
         })
+    }
+
+    fn emit_block(&mut self, items: &Vec<BlockItem>) -> Vec<Instruction> {
+        let mut instructions = vec![];
+        for item in items {
+            match item {
+                BlockItem::Declaration(_) => {
+                    // For now, we ignore declarations since we don't have variables in our IR
+                    // In a more complete implementation, we would need to handle variable declarations and initializations
+                }
+                BlockItem::Statement(stmt) => {
+                    instructions.extend(self.emit_statement(stmt));
+                }
+            }
+        }
+        instructions
     }
 
     fn emit_statement(&mut self, stmt: &Statement) -> Vec<Instruction> {
@@ -123,6 +139,7 @@ impl TackyEmitter {
                 instructions.push(Instruction::Return(value));
                 instructions
             }
+            _ => todo!("Unsupported statement {:?}", stmt),
         }
     }
 
@@ -223,6 +240,7 @@ impl TackyEmitter {
                 });
                 dst
             }
+            _ => todo!("Unsupported expression {:?}", expr),
         }
     }
 
@@ -254,6 +272,7 @@ impl TackyEmitter {
             BinaryOp::Less => BinaryOperator::Less,
             BinaryOp::GreaterEqual => BinaryOperator::GreaterEqual,
             BinaryOp::LessEqual => BinaryOperator::LessEqual,
+            _ => todo!("Unsupported binary operator {:?}", op),
         }
     }
 

@@ -16,12 +16,12 @@ impl Program {
 #[derive(Debug, Clone)]
 pub struct FunctionDefinition {
     pub name: String,
-    pub body: Statement,
+    pub body: Vec<BlockItem>,
 }
 
 impl FunctionDefinition {
 
-    pub fn new(name: String, body: Statement) -> Self {
+    pub fn new(name: String, body: Vec<BlockItem>) -> Self {
         FunctionDefinition { name, body }
     }
 
@@ -31,8 +31,41 @@ impl FunctionDefinition {
 }
 
 #[derive(Debug, Clone)]
+pub enum BlockItem {
+    Declaration(Declaration),
+    Statement(Statement),
+}
+
+impl BlockItem {
+    pub fn accept<R>(&self, visitor: &mut impl Visitor<R>) -> R {
+        match self {
+            BlockItem::Declaration(d) => d.accept(visitor),
+            BlockItem::Statement(s) => s.accept(visitor),
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct Declaration {
+    pub name: String,
+    pub init_expr: Option<Expression>,
+}
+
+impl Declaration {
+    pub fn new(name: String, init_expr: Option<Expression>) -> Self {
+        Declaration { name, init_expr }
+    }
+
+    pub fn accept<R>(&self, visitor: &mut impl Visitor<R>) -> R {
+        visitor.visit_declaration(self)
+    }
+}
+
+#[derive(Debug, Clone)]
 pub enum Statement {
     Return(Expression),
+    Expression(Expression),
+    Null,
 }
 
 impl Statement {
@@ -44,8 +77,10 @@ impl Statement {
 #[derive(Debug, Clone)]
 pub enum Expression {
     IntegerConstant(i32),
+    Var(String),
     UnaryExpr(UnaryOp, Box<Expression>),
     BinaryExpr(BinaryOp, Box<Expression>, Box<Expression>),
+    Assignment(Box<Expression>, Box<Expression>),
 }
 
 impl Expression {
@@ -81,11 +116,30 @@ pub enum BinaryOp {
     Less,
     GreaterEqual,
     LessEqual,
+    Assign,
 }
+
+#[derive(Debug, Clone)]
+pub enum Associativity {
+    Left,
+    Right,
+}
+
+impl From<&BinaryOp> for Associativity {
+    fn from(value: &BinaryOp) -> Self {
+        use BinaryOp::*;
+        match value {
+            Assign => Associativity::Right,
+            _ => Associativity::Left,
+        }
+    }
+}
+
 
 pub trait Visitor<A> {
     fn visit_program(&mut self, program: &Program) -> A;
     fn visit_function_definition(&mut self, func_def: &FunctionDefinition) -> A;
+    fn visit_declaration(&mut self, decl: &Declaration) -> A;
     fn visit_statement(&mut self, stmt: &Statement) -> A;
     fn visit_expression(&mut self, expr: &Expression) -> A;
 }
