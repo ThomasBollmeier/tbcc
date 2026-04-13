@@ -1,4 +1,4 @@
-use crate::ast::{BinaryOp, BlockItem, Expression, FunctionDefinition, Statement, UnaryOp};
+use crate::ast::{BinaryOp, BlockItem, Declaration, Expression, FunctionDefinition, Statement, UnaryOp};
 use crate::tacky::Instruction::Unary;
 use anyhow::Result;
 use std::collections::HashMap;
@@ -108,7 +108,8 @@ impl TackyEmitter {
         function_definition: &FunctionDefinition,
     ) -> Result<FunctionDef> {
         let name = function_definition.name.clone();
-        let instructions = self.emit_block(&function_definition.body);
+        let mut instructions = self.emit_block(&function_definition.body);
+        instructions.push(Instruction::Return(IntegerConstant(0))); // Ensure function ends with a return
 
         Ok(FunctionDef {
             name,
@@ -120,15 +121,29 @@ impl TackyEmitter {
         let mut instructions = vec![];
         for item in items {
             match item {
-                BlockItem::Declaration(_) => {
-                    // For now, we ignore declarations since we don't have variables in our IR
-                    // In a more complete implementation, we would need to handle variable declarations and initializations
+                BlockItem::Declaration(decl) => {
+                    instructions.extend(self.emit_declaration(decl));
                 }
                 BlockItem::Statement(stmt) => {
                     instructions.extend(self.emit_statement(stmt));
                 }
             }
         }
+        instructions
+    }
+
+    fn emit_declaration(&mut self, declaration: &Declaration) -> Vec<Instruction> {
+        let mut instructions = vec![];
+
+        if let Some(expr) = &declaration.init_expr {
+            let init_value = self.emit_expression(expr, &mut instructions);
+            let var_name = declaration.name.clone();
+            instructions.push(Instruction::Copy {
+                src: init_value,
+                dst: Value::Variable(var_name),
+            });
+        }
+
         instructions
     }
 
@@ -140,7 +155,12 @@ impl TackyEmitter {
                 instructions.push(Instruction::Return(value));
                 instructions
             }
-            _ => todo!("Unsupported statement {:?}", stmt),
+            Statement::Expression(expr) => {
+                let mut instructions = vec![];
+                self.emit_expression(expr, &mut instructions);
+                instructions
+            }
+            Statement::Null => vec![],
         }
     }
 
@@ -241,7 +261,13 @@ impl TackyEmitter {
                 });
                 dst
             }
-            _ => todo!("Unsupported expression {:?}", expr),
+            Expression::Assignment(left, right) => {
+                let src = self.emit_expression(right, instructions);
+                let dst = self.emit_expression(left, instructions);
+                instructions.push(Instruction::Copy { src, dst: dst.clone() });
+                dst
+            }
+            Expression::Var(name) => Value::Variable(name.clone()),
         }
     }
 
