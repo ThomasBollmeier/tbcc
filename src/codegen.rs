@@ -180,6 +180,7 @@ mod tests {
     use crate::assembly;
     use crate::lexer::Lexer;
     use crate::parser::Parser;
+    use crate::semantic::NameCreator;
     use crate::tacky::TackyEmitter;
 
     #[test]
@@ -192,7 +193,7 @@ mod tests {
         let tokens = lexer.scan_tokens(code).expect("Failed to scan tokens");
         let program = parser.parse(tokens).expect("Failed to parse program");
 
-        let mut tacky_emitter = TackyEmitter::new();
+        let mut tacky_emitter = TackyEmitter::new(NameCreator::new_ref());
         let tacky_program = tacky_emitter
             .emit_program(&program)
             .expect("Failed to emit tacky program");
@@ -218,7 +219,7 @@ mod tests {
         let tokens = lexer.scan_tokens(code).expect("Failed to scan tokens");
         let program = parser.parse(tokens).expect("Failed to parse program");
 
-        let mut tacky_emitter = TackyEmitter::new();
+        let mut tacky_emitter = TackyEmitter::new(NameCreator::new_ref());
         let tacky_program = tacky_emitter
             .emit_program(&program)
             .expect("Failed to emit tacky program");

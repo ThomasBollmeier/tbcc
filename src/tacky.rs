@@ -3,6 +3,7 @@ use crate::tacky::Instruction::Unary;
 use anyhow::Result;
 use std::collections::HashMap;
 use crate::tacky::Value::IntegerConstant;
+use crate::semantic::NameCreatorRef;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Program {
@@ -84,14 +85,14 @@ pub enum BinaryOperator {
 
 #[derive(Debug, Clone)]
 pub struct TackyEmitter {
-    cnt_tmp_vars: usize,
+    name_creator: NameCreatorRef,
     label_counters: HashMap<String, usize>,
 }
 
 impl TackyEmitter {
-    pub fn new() -> TackyEmitter {
+    pub fn new(name_creator: NameCreatorRef) -> TackyEmitter {
         TackyEmitter {
-            cnt_tmp_vars: 0,
+            name_creator,
             label_counters: HashMap::new(),
         }
     }
@@ -277,9 +278,7 @@ impl TackyEmitter {
     }
 
     fn make_temp_var(&mut self) -> String {
-        let ret = format!("tmp.{}", self.cnt_tmp_vars);
-        self.cnt_tmp_vars += 1;
-        ret
+        self.name_creator.borrow_mut().make_temp_var_name()
     }
 
     fn make_label(&mut self, prefix: &str) -> String {
@@ -292,12 +291,13 @@ impl TackyEmitter {
 
 #[cfg(test)]
 mod tests {
+    use crate::semantic::NameCreator;
     use super::*;
     use crate::tacky::UnaryOperator::{Complement, Negate};
 
     #[test]
     fn emit_return() {
-        let mut emitter = TackyEmitter::new();
+        let mut emitter = TackyEmitter::new(NameCreator::new_ref());
         let stmt = Statement::Return(Expression::IntegerConstant(42));
         let expected = vec![Instruction::Return(IntegerConstant(42))];
         let actual = emitter.emit_statement(&stmt);
@@ -311,7 +311,7 @@ mod tests {
         use Instruction::*;
         use Value::*;
 
-        let mut emitter = TackyEmitter::new();
+        let mut emitter = TackyEmitter::new(NameCreator::new_ref());
         let stmt = Statement::Return(UnaryExpr(
             UnaryOp::Negate,
             Box::new(UnaryExpr(
@@ -352,7 +352,7 @@ mod tests {
         use Instruction::*;
         use Value::*;
 
-        let mut emitter = TackyEmitter::new();
+        let mut emitter = TackyEmitter::new(NameCreator::new_ref());
         let stmt = Statement::Return(BinaryExpr(
             BinaryOp::Add,
             Box::new(Expression::IntegerConstant(1)),
@@ -390,7 +390,7 @@ mod tests {
         use Instruction::*;
         use Value::*;
 
-        let mut emitter = TackyEmitter::new();
+        let mut emitter = TackyEmitter::new(NameCreator::new_ref());
         let stmt = Statement::Return(BinaryExpr(
             BinaryOp::ShiftLeft,
             Box::new(Expression::IntegerConstant(8)),
@@ -418,7 +418,7 @@ mod tests {
         use Instruction::*;
         use Value::*;
 
-        let mut emitter = TackyEmitter::new();
+        let mut emitter = TackyEmitter::new(NameCreator::new_ref());
         let stmt = Statement::Return(BinaryExpr(
             BinaryOp::ShiftRight,
             Box::new(Expression::IntegerConstant(16)),
@@ -445,7 +445,7 @@ mod tests {
         use Instruction::*;
         use Value::*;
 
-        let mut emitter = TackyEmitter::new();
+        let mut emitter = TackyEmitter::new(NameCreator::new_ref());
         let stmt = Statement::Return(BinaryExpr(
             BinaryOp::LogicalAnd,
             Box::new(Expression::IntegerConstant(1)),
@@ -487,7 +487,7 @@ mod tests {
         use Instruction::*;
         use Value::*;
 
-        let mut emitter = TackyEmitter::new();
+        let mut emitter = TackyEmitter::new(NameCreator::new_ref());
         let stmt = Statement::Return(BinaryExpr(
             BinaryOp::LogicalOr,
             Box::new(Expression::IntegerConstant(0)),

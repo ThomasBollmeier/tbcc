@@ -358,6 +358,7 @@ mod tests {
     };
     use crate::lexer::Lexer;
     use crate::parser::Parser;
+    use crate::semantic::NameCreator;
     use crate::tacky::{
         BinaryOperator, FunctionDef as TackyFunctionDef, Instruction as TackyInstruction,
         Program as TackyProgram, TackyEmitter, Value,
@@ -373,7 +374,7 @@ mod tests {
         let parser = Parser::new();
         let program = parser.parse(tokens).expect("Failed to parse program");
 
-        let mut tacky_emitter = TackyEmitter::new();
+        let mut tacky_emitter = TackyEmitter::new(NameCreator::new_ref());
         let tacky_program = tacky_emitter
             .emit_program(&program)
             .expect("Failed to emit");

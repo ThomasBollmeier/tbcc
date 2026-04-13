@@ -6,7 +6,7 @@
 #[command(about="A compiler for a simplified C", long_about = None)]
 #[command(group(
     clap::ArgGroup::new("compile_step")
-        .args(["lex", "parse", "tacky", "codegen", "dont_assemble"])
+        .args(["lex", "parse", "validate", "tacky", "codegen", "dont_assemble"])
         .multiple(false)
 ))]
 pub struct Options {
@@ -15,6 +15,8 @@ pub struct Options {
     pub lex: bool,
     #[arg(long, help = "Stop after parsing")]
     pub parse: bool,
+    #[arg(long, help = "Stop after validation")]
+    pub validate: bool,
     #[arg(long, help = "Stop after tacky generation")]
     pub tacky: bool,
     #[arg(long, help = "Stop before code generation")]

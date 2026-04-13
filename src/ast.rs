@@ -11,6 +11,9 @@ impl Program {
     pub fn accept<R>(&self, visitor: &mut impl Visitor<R>) -> R {
         visitor.visit_program(self)
     }
+    pub fn accept_mut<R>(&mut self, visitor: &mut impl VisitorMut<R>) -> R {
+        visitor.visit_program(self)
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -28,6 +31,10 @@ impl FunctionDefinition {
     pub fn accept<R>(&self, visitor: &mut impl Visitor<R>) -> R {
         visitor.visit_function_definition(self)
     }
+
+    pub fn accept_mut<R>(&mut self, visitor: &mut impl VisitorMut<R>) -> R {
+        visitor.visit_function_definition(self)
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -41,6 +48,13 @@ impl BlockItem {
         match self {
             BlockItem::Declaration(d) => d.accept(visitor),
             BlockItem::Statement(s) => s.accept(visitor),
+        }
+    }
+
+    pub fn accept_mut<R>(&mut self, visitor: &mut impl VisitorMut<R>) -> R {
+        match self {
+            BlockItem::Declaration(d) => d.accept_mut(visitor),
+            BlockItem::Statement(s) => s.accept_mut(visitor),
         }
     }
 }
@@ -59,6 +73,10 @@ impl Declaration {
     pub fn accept<R>(&self, visitor: &mut impl Visitor<R>) -> R {
         visitor.visit_declaration(self)
     }
+
+    pub fn accept_mut<R>(&mut self, visitor: &mut impl VisitorMut<R>) -> R {
+        visitor.visit_declaration(self)
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -70,6 +88,10 @@ pub enum Statement {
 
 impl Statement {
     pub fn accept<R>(&self, visitor: &mut impl Visitor<R>) -> R {
+        visitor.visit_statement(self)
+    }
+
+    pub fn accept_mut<R>(&mut self, visitor: &mut impl VisitorMut<R>) -> R {
         visitor.visit_statement(self)
     }
 }
@@ -85,6 +107,10 @@ pub enum Expression {
 
 impl Expression {
     pub fn accept<R>(&self, visitor: &mut impl Visitor<R>) -> R {
+        visitor.visit_expression(self)
+    }
+
+    pub fn accept_mut<R>(&mut self, visitor: &mut impl VisitorMut<R>) -> R {
         visitor.visit_expression(self)
     }
 }
@@ -142,4 +168,12 @@ pub trait Visitor<A> {
     fn visit_declaration(&mut self, decl: &Declaration) -> A;
     fn visit_statement(&mut self, stmt: &Statement) -> A;
     fn visit_expression(&mut self, expr: &Expression) -> A;
+}
+
+pub trait VisitorMut<A> {
+    fn visit_program(&mut self, program: &mut Program) -> A;
+    fn visit_function_definition(&mut self, func_def: &mut FunctionDefinition) -> A;
+    fn visit_declaration(&mut self, decl: &mut Declaration) -> A;
+    fn visit_statement(&mut self, stmt: &mut Statement) -> A;
+    fn visit_expression(&mut self, expr: &mut Expression) -> A;
 }

@@ -6,6 +6,7 @@ use crate::parser::Parser;
 use anyhow::{Result, anyhow};
 use std::path::Path;
 use std::process::Command;
+use crate::semantic::{NameCreator, VariableResolver};
 use crate::tacky::TackyEmitter;
 
 pub fn compile(options: &Options) -> Result<()> {
@@ -28,7 +29,15 @@ pub fn compile(options: &Options) -> Result<()> {
         return Ok(());
     }
 
-    let mut tacky_emitter = TackyEmitter::new();
+    let name_creator = NameCreator::new_ref();
+    let mut variable_resolver = VariableResolver::new(name_creator.clone());
+    variable_resolver.resolve(&mut program.clone())?;
+
+    if options.validate {
+        return Ok(());
+    }
+
+    let mut tacky_emitter = TackyEmitter::new(name_creator);
     let tacky_program = tacky_emitter.emit_program(&program)?;
 
     if options.tacky {
