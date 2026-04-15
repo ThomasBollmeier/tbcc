@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use crate::token::{Token, TokenType, TokenValue};
 use anyhow::Result;
-use regex::Regex;
+use fancy_regex::Regex;
 
 pub type ValueFn = fn(lexeme: &str) -> TokenValue;
 
@@ -51,7 +51,6 @@ impl Lexer {
         lexer.add_token_type(TokenType::Comma, r",");
         lexer.add_token_type(TokenType::Semicolon, r";");
         lexer.add_token_type(TokenType::Minus, r"\-");
-        lexer.add_token_type(TokenType::MinusMinus, r"\-\-");
         lexer.add_token_type(TokenType::Tilde, r"~");
         lexer.add_token_type(TokenType::Plus, r"\+");
         lexer.add_token_type(TokenType::Asterisk, r"\*");
@@ -72,6 +71,10 @@ impl Lexer {
         lexer.add_token_type(TokenType::Less, r"<");
         lexer.add_token_type(TokenType::LessEqual, r"<=");
         lexer.add_token_type(TokenType::Assign, r"=");
+        lexer.add_token_type(TokenType::IncrementPrefix, r"\+\+(?=[\w\(])");
+        lexer.add_token_type(TokenType::IncrementPostfix, r"\+\+(?![\w\(])");
+        lexer.add_token_type(TokenType::DecrementPrefix, r"\-\-(?=[\w\(])");
+        lexer.add_token_type(TokenType::DecrementPostfix, r"\-\-(?![\w\(])");
 
         lexer.keywords.insert("int".to_string(), TokenType::Int);
         lexer.keywords.insert("void".to_string(), TokenType::Void);
@@ -168,7 +171,7 @@ impl Lexer {
         let mut max_match: Option<(TokenType, String, bool, Option<TokenValue>)> = None;
 
         for token_type_data in &self.token_types {
-            if let Some(mat) = token_type_data.regex.find(code) {
+            if let Ok(Some(mat)) = token_type_data.regex.find(code) {
                 if mat.start() == 0 {
                     let matched_str = mat.as_str().to_string();
                     if max_match.is_none()
@@ -254,7 +257,7 @@ int main(void) {
         assert_eq!(tokens[1].line, 2);
         assert_eq!(tokens[1].column, 10);
 
-        assert_eq!(tokens[2].token_type, TokenType::MinusMinus);
+        assert_eq!(tokens[2].token_type, TokenType::DecrementPostfix);
         assert_eq!(tokens[2].lexeme, "--");
         assert_eq!(tokens[2].line, 2);
         assert_eq!(tokens[2].column, 11);
@@ -365,6 +368,43 @@ int main(void) {
         assert_eq!(tokens[1].lexeme, "=");
         assert_eq!(tokens[2].token_type, TokenType::Identifier);
         assert_eq!(tokens[2].lexeme, "b");
+    }
+
+    #[test]
+    fn scan_increment_decrement() {
+        let lexer = Lexer::new();
+        let code = "++a; a++; --b; b--;";
+
+        let tokens = lexer.scan_tokens(code).unwrap();
+        assert_eq!(tokens.len(), 12);
+
+        assert_eq!(tokens[0].token_type, TokenType::IncrementPrefix);
+        assert_eq!(tokens[0].lexeme, "++");
+        assert_eq!(tokens[1].token_type, TokenType::Identifier);
+        assert_eq!(tokens[1].lexeme, "a");
+        assert_eq!(tokens[2].token_type, TokenType::Semicolon);
+        assert_eq!(tokens[2].lexeme, ";");
+
+        assert_eq!(tokens[3].token_type, TokenType::Identifier);
+        assert_eq!(tokens[3].lexeme, "a");
+        assert_eq!(tokens[4].token_type, TokenType::IncrementPostfix);
+        assert_eq!(tokens[4].lexeme, "++");
+        assert_eq!(tokens[5].token_type, TokenType::Semicolon);
+        assert_eq!(tokens[5].lexeme, ";");
+
+        assert_eq!(tokens[6].token_type, TokenType::DecrementPrefix);
+        assert_eq!(tokens[6].lexeme, "--");
+        assert_eq!(tokens[7].token_type, TokenType::Identifier);
+        assert_eq!(tokens[7].lexeme, "b");
+        assert_eq!(tokens[8].token_type, TokenType::Semicolon);
+        assert_eq!(tokens[8].lexeme, ";");
+
+        assert_eq!(tokens[9].token_type, TokenType::Identifier);
+        assert_eq!(tokens[9].lexeme, "b");
+        assert_eq!(tokens[10].token_type, TokenType::DecrementPostfix);
+        assert_eq!(tokens[10].lexeme, "--");
+        assert_eq!(tokens[11].token_type, TokenType::Semicolon);
+        assert_eq!(tokens[11].lexeme, ";");
     }
 
 }

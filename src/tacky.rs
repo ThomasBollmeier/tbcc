@@ -1,9 +1,11 @@
-use crate::ast::{BinaryOp, BlockItem, Declaration, Expression, FunctionDefinition, Statement, UnaryOp};
+use crate::ast::{
+    BinaryOp, BlockItem, Declaration, Expression, FunctionDefinition, Statement, UnaryOp,
+};
+use crate::semantic::NameCreatorRef;
 use crate::tacky::Instruction::Unary;
+use crate::tacky::Value::IntegerConstant;
 use anyhow::Result;
 use std::collections::HashMap;
-use crate::tacky::Value::IntegerConstant;
-use crate::semantic::NameCreatorRef;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Program {
@@ -168,9 +170,9 @@ impl TackyEmitter {
         match expr {
             Expression::IntegerConstant(value) => IntegerConstant(*value),
             Expression::UnaryExpr(op, expr) => {
+                let op = self.unary_op(op);
                 let src = self.emit_expression(expr, instructions);
                 let dst = Value::Variable(self.make_temp_var());
-                let op = self.unary_op(op);
                 instructions.push(Unary {
                     op,
                     src,
@@ -195,7 +197,7 @@ impl TackyEmitter {
                     target: false_label.clone(),
                 });
 
-                instructions.push(Instruction::Copy{
+                instructions.push(Instruction::Copy {
                     src: IntegerConstant(1),
                     dst: result.clone(),
                 });
@@ -204,7 +206,7 @@ impl TackyEmitter {
                 });
 
                 instructions.push(Instruction::Label(false_label));
-                instructions.push(Instruction::Copy{
+                instructions.push(Instruction::Copy {
                     src: IntegerConstant(0),
                     dst: result.clone(),
                 });
@@ -230,7 +232,7 @@ impl TackyEmitter {
                     target: true_label.clone(),
                 });
 
-                instructions.push(Instruction::Copy{
+                instructions.push(Instruction::Copy {
                     src: IntegerConstant(0),
                     dst: result.clone(),
                 });
@@ -239,7 +241,7 @@ impl TackyEmitter {
                 });
 
                 instructions.push(Instruction::Label(true_label));
-                instructions.push(Instruction::Copy{
+                instructions.push(Instruction::Copy {
                     src: IntegerConstant(1),
                     dst: result.clone(),
                 });
@@ -261,11 +263,31 @@ impl TackyEmitter {
                 });
                 dst
             }
-            Expression::Assignment(left, right) => {
+            Expression::Assignment {
+                left,
+                right,
+                is_postfix,
+            } => {
                 let src = self.emit_expression(right, instructions);
                 let dst = self.emit_expression(left, instructions);
-                instructions.push(Instruction::Copy { src, dst: dst.clone() });
-                dst
+                if !is_postfix {
+                    instructions.push(Instruction::Copy {
+                        src,
+                        dst: dst.clone(),
+                    });
+                    dst
+                } else {
+                    let original_value = Value::Variable(self.make_temp_var());
+                    instructions.push(Instruction::Copy {
+                        src: dst.clone(),
+                        dst: original_value.clone(),
+                    });
+                    instructions.push(Instruction::Copy {
+                        src,
+                        dst,
+                    });
+                    original_value
+                }
             }
             Expression::Var(name) => Value::Variable(name.clone()),
         }
@@ -317,8 +339,8 @@ impl TackyEmitter {
 
 #[cfg(test)]
 mod tests {
-    use crate::semantic::NameCreator;
     use super::*;
+    use crate::semantic::NameCreator;
     use crate::tacky::UnaryOperator::{Complement, Negate};
 
     #[test]
@@ -548,4 +570,158 @@ mod tests {
         let actual = emitter.emit_statement(&stmt);
         assert_eq!(expected, actual);
     }
+
+    #[test]
+    fn emit_prefix_increment_expr() {
+        use BinaryOperator::*;
+        use Expression::*;
+        use Instruction::*;
+        use Value::*;
+
+        let mut emitter = TackyEmitter::new(NameCreator::new_ref());
+        let stmt = Statement::Return(Assignment {
+            left: Box::new(Var("a".to_string())),
+            right: Box::new(BinaryExpr(
+                BinaryOp::Add,
+                Box::new(Var("a".to_string())),
+                Box::new(Expression::IntegerConstant(1)),
+            )),
+            is_postfix: false,
+        });
+
+        let expected = vec![
+            Binary {
+                op: Add,
+                src1: Variable("a".to_string()),
+                src2: Value::IntegerConstant(1),
+                dst: Variable("tmp.0".to_string()),
+            },
+            Copy {
+                src: Variable("tmp.0".to_string()),
+                dst: Variable("a".to_string()),
+            },
+            Return(Variable("a".to_string())),
+        ];
+
+        let actual = emitter.emit_statement(&stmt);
+        assert_eq!(expected, actual);
+    }
+
+    #[test]
+    fn emit_postfix_increment_expr() {
+        use BinaryOperator::*;
+        use Expression::*;
+        use Instruction::*;
+        use Value::*;
+
+        let mut emitter = TackyEmitter::new(NameCreator::new_ref());
+        let stmt = Statement::Return(Assignment {
+            left: Box::new(Var("a".to_string())),
+            right: Box::new(BinaryExpr(
+                BinaryOp::Add,
+                Box::new(Var("a".to_string())),
+                Box::new(Expression::IntegerConstant(1)),
+            )),
+            is_postfix: true,
+        });
+
+        let expected = vec![
+            Binary {
+                op: Add,
+                src1: Variable("a".to_string()),
+                src2: Value::IntegerConstant(1),
+                dst: Variable("tmp.0".to_string()),
+            },
+            Copy {
+                src: Variable("a".to_string()),
+                dst: Variable("tmp.1".to_string()),
+            },
+            Copy {
+                src: Variable("tmp.0".to_string()),
+                dst: Variable("a".to_string()),
+            },
+            Return(Variable("tmp.1".to_string())),
+        ];
+
+        let actual = emitter.emit_statement(&stmt);
+        assert_eq!(expected, actual);
+    }
+
+    #[test]
+    fn emit_prefix_decrement_expr() {
+        use BinaryOperator::*;
+        use Expression::*;
+        use Instruction::*;
+        use Value::*;
+
+        let mut emitter = TackyEmitter::new(NameCreator::new_ref());
+        let stmt = Statement::Return(Assignment {
+            left: Box::new(Var("a".to_string())),
+            right: Box::new(BinaryExpr(
+                BinaryOp::Subtract,
+                Box::new(Var("a".to_string())),
+                Box::new(Expression::IntegerConstant(1)),
+            )),
+            is_postfix: false,
+        });
+
+        let expected = vec![
+            Binary {
+                op: Subtract,
+                src1: Variable("a".to_string()),
+                src2: Value::IntegerConstant(1),
+                dst: Variable("tmp.0".to_string()),
+            },
+            Copy {
+                src: Variable("tmp.0".to_string()),
+                dst: Variable("a".to_string()),
+            },
+            Return(Variable("a".to_string())),
+        ];
+
+        let actual = emitter.emit_statement(&stmt);
+        assert_eq!(expected, actual);
+    }
+
+    #[test]
+    fn emit_postfix_decrement_expr() {
+        use BinaryOperator::*;
+        use Expression::*;
+        use Instruction::*;
+        use Value::*;
+
+        let mut emitter = TackyEmitter::new(NameCreator::new_ref());
+        let stmt = Statement::Return(Assignment {
+            left: Box::new(Var("a".to_string())),
+            right: Box::new(BinaryExpr(
+                BinaryOp::Subtract,
+                Box::new(Var("a".to_string())),
+                Box::new(Expression::IntegerConstant(1)),
+            )),
+            is_postfix: true,
+        });
+
+        let expected = vec![
+            Binary {
+                op: Subtract,
+                src1: Variable("a".to_string()),
+                src2: Value::IntegerConstant(1),
+                dst: Variable("tmp.0".to_string()),
+            },
+            Copy {
+                src: Variable("a".to_string()),
+                dst: Variable("tmp.1".to_string()),
+            },
+            Copy {
+                src: Variable("tmp.0".to_string()),
+                dst: Variable("a".to_string()),
+            },
+            Return(Variable("tmp.1".to_string())),
+        ];
+
+        let actual = emitter.emit_statement(&stmt);
+        assert_eq!(expected, actual);
+    }
+
+
 }

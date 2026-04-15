@@ -1,7 +1,7 @@
 use crate::ast::{Declaration, Expression, FunctionDefinition, Program, Statement, VisitorMut};
 use crate::semantic::name_creator::NameCreatorRef;
 use crate::semantic::scope::{Scope, ScopeRef};
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 
 pub struct VariableResolver {
     name_creator: NameCreatorRef,
@@ -68,7 +68,11 @@ impl VisitorMut<Result<()>> for VariableResolver {
     fn visit_expression(&mut self, expr: &mut Expression) -> Result<()> {
         use Expression::*;
         match expr {
-            Assignment(left, right) => {
+            Assignment {
+                left,
+                right,
+                is_postfix: _,
+            } => {
                 match **left {
                     Var(_) => {}
                     _ => return Err(anyhow!("Left-hand side of assignment must be a variable")),
@@ -90,7 +94,7 @@ impl VisitorMut<Result<()>> for VariableResolver {
                 left.accept_mut(self)?;
                 right.accept_mut(self)?;
             }
-            _ => {},
+            _ => {}
         }
 
         Ok(())
@@ -138,7 +142,11 @@ mod tests {
         }
 
         match &body[2] {
-            BlockItem::Statement(Statement::Expression(Expression::Assignment(left, right))) => {
+            BlockItem::Statement(Statement::Expression(Expression::Assignment {
+                left,
+                right,
+                is_postfix: _,
+            })) => {
                 match left.as_ref() {
                     Expression::Var(name) => assert_eq!(name, "var.x.0"),
                     _ => panic!("Expected assignment left side to be variable"),
@@ -211,6 +219,24 @@ mod tests {
         );
     }
 
+    #[test]
+    fn fails_on_postfix_inc_of_non_lvalue() {
+        let result = resolve_code(
+            r#"
+            int main(void) {
+                int a = 0;
+                (a = 4)++;
+            }
+            "#,
+        );
+
+        let err = result.expect_err("Expected non-lvalue expression error");
+        assert!(
+            err.to_string()
+                .contains("Left-hand side of assignment must be a variable")
+        );
+    }
+
     fn resolve_code(code: &str) -> Result<Program> {
         let lexer = Lexer::new();
         let parser = Parser::new();
@@ -224,4 +250,3 @@ mod tests {
         Ok(program)
     }
 }
-

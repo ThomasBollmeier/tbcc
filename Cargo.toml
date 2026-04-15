@@ -7,4 +7,4 @@ authors = ["Thomas Bollmeier"]
 [dependencies]
 clap = { version = "4.5.51", features = ["derive"] }
 anyhow = "1.0.100"
-regex = "1.12.3"
+fancy-regex = "0.17.0"

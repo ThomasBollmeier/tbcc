@@ -13,7 +13,6 @@ pub enum TokenType {
     Comma,
     Semicolon,
     Minus,
-    MinusMinus,
     Tilde,
     Plus,
     Asterisk,
@@ -34,6 +33,10 @@ pub enum TokenType {
     Greater,
     GreaterEqual,
     Assign,
+    IncrementPrefix,
+    IncrementPostfix,
+    DecrementPrefix,
+    DecrementPostfix,
 }
 
 #[derive(Debug, Clone, PartialEq)]

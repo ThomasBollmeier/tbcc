@@ -102,7 +102,11 @@ pub enum Expression {
     Var(String),
     UnaryExpr(UnaryOp, Box<Expression>),
     BinaryExpr(BinaryOp, Box<Expression>, Box<Expression>),
-    Assignment(Box<Expression>, Box<Expression>),
+    Assignment{
+        left: Box<Expression>,
+        right: Box<Expression>,
+        is_postfix: bool,
+    },
 }
 
 impl Expression {
@@ -119,7 +123,7 @@ impl Expression {
 pub enum UnaryOp {
     Negate,
     Complement,
-    Not
+    Not,
 }
 
 #[derive(Debug, Clone)]

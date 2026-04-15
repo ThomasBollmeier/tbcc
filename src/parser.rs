@@ -1,5 +1,8 @@
 use crate::ast::Statement::Return;
-use crate::ast::{Associativity, BinaryOp, BlockItem, Declaration, Expression, FunctionDefinition, Program, Statement, UnaryOp};
+use crate::ast::{
+    Associativity, BinaryOp, BlockItem, Declaration, Expression, FunctionDefinition, Program,
+    Statement, UnaryOp,
+};
 use crate::token::{Token, TokenStream, TokenType, TokenValue};
 use anyhow::{Result, anyhow};
 
@@ -86,13 +89,11 @@ impl Parser {
     fn statement(&self, stream: &mut TokenStream) -> Result<Statement> {
         let next_token = stream.peek();
         match next_token {
-            Some(token) => {
-                match token.token_type {
-                    TokenType::Return => self.return_statement(stream),
-                    TokenType::Semicolon => self.null_statement(stream),
-                    _ => self.expression_statement(stream),
-                }
-            }
+            Some(token) => match token.token_type {
+                TokenType::Return => self.return_statement(stream),
+                TokenType::Semicolon => self.null_statement(stream),
+                _ => self.expression_statement(stream),
+            },
             None => Err(anyhow!("Unexpected end of statement")),
         }
     }
@@ -132,18 +133,30 @@ impl Parser {
             let assoc = Associativity::from(&op);
             let next_min_prec = match assoc {
                 Associativity::Left => prec + 1,
-                Associativity::Right => prec
+                Associativity::Right => prec,
             };
 
             let right = self.expression(stream, next_min_prec)?;
             left = match op {
-                BinaryOp::Assign => Expression::Assignment(Box::new(left), Box::new(right)),
+                BinaryOp::Assign => Expression::Assignment{
+                    left: Box::new(left),
+                    right: Box::new(right),
+                    is_postfix: false,
+                },
                 _ => Expression::BinaryExpr(op, Box::new(left), Box::new(right)),
             };
-
         }
 
         Ok(left)
+    }
+
+    fn get_unary_op(&self, token_type: &TokenType) -> Option<UnaryOp> {
+        match token_type {
+            TokenType::Minus => Some(UnaryOp::Negate),
+            TokenType::Tilde => Some(UnaryOp::Complement),
+            TokenType::LogicalNot => Some(UnaryOp::Not),
+            _ => None,
+        }
     }
 
     fn get_binary_op(&self, token_type: &TokenType) -> Option<BinaryOp> {
@@ -190,32 +203,71 @@ impl Parser {
 
     fn factor(&self, stream: &mut TokenStream) -> Result<Expression> {
         let token = self.consume(stream)?;
-        match token.token_type {
+        let mut expr = match token.token_type {
             TokenType::IntegerConstant => {
                 if let Some(TokenValue::Integer(value)) = token.value {
-                    Ok(Expression::IntegerConstant(value))
+                    Expression::IntegerConstant(value)
                 } else {
-                    Err(anyhow!("Expected integer constant value"))
+                    return Err(anyhow!("Expected integer constant value"));
                 }
             }
-            TokenType::Identifier => {
-                Ok(Expression::Var(token.lexeme))
-            }
+            TokenType::Identifier => Expression::Var(token.lexeme),
             TokenType::Minus | TokenType::Tilde | TokenType::LogicalNot => {
-                let op = match token.token_type {
-                    TokenType::Minus => UnaryOp::Negate,
-                    TokenType::Tilde => UnaryOp::Complement,
-                    TokenType::LogicalNot => UnaryOp::Not,
-                    _ => unreachable!(),
+                let op = self.get_unary_op(&token.token_type).unwrap();
+                Expression::UnaryExpr(op, Box::new(self.factor(stream)?))
+            }
+            TokenType::IncrementPrefix | TokenType::DecrementPrefix => {
+                let op = if token.token_type == TokenType::IncrementPrefix {
+                    BinaryOp::Add
+                } else {
+                    BinaryOp::Subtract
                 };
-                Ok(Expression::UnaryExpr(op, Box::new(self.factor(stream)?)))
+                let expr = self.factor(stream)?;
+                Expression::Assignment {
+                    left: Box::new(expr.clone()),
+                    right: Box::new(Expression::BinaryExpr(
+                        op,
+                        Box::new(expr),
+                        Box::new(Expression::IntegerConstant(1)),
+                        )),
+                    is_postfix: false,
+                }
             }
             TokenType::LeftParen => {
                 let expr = self.expression(stream, 0)?;
                 self.expect(stream, TokenType::RightParen)?;
-                Ok(expr)
+                expr
             }
-            _ => Err(anyhow!("Unexpected token {:?}", token)),
+            _ => return Err(anyhow!("Unexpected token {:?}", token)),
+        };
+
+        let next_token = stream.peek();
+        if let Some(token) = next_token {
+            match token.token_type {
+                TokenType::IncrementPostfix => {
+                    stream.advance(); // consume '++'
+                    expr = self.create_postfix_assignment(BinaryOp::Add, &expr);
+                }
+                TokenType::DecrementPostfix => {
+                    stream.advance(); // consume '--'
+                    expr = self.create_postfix_assignment(BinaryOp::Subtract, &expr);
+                }
+                _ => {}
+            }
+        }
+
+        Ok(expr)
+    }
+
+    fn create_postfix_assignment(&self, op: BinaryOp, expr: &Expression) -> Expression {
+        Expression::Assignment {
+            left: Box::new(expr.clone()),
+            right: Box::new(Expression::BinaryExpr(
+                op,
+                Box::new(expr.clone()),
+                Box::new(Expression::IntegerConstant(1)),
+            )),
+            is_postfix: true,
         }
     }
 
@@ -284,7 +336,7 @@ mod tests {
     }
 
     #[test]
-    fn parse_bitwise()  {
+    fn parse_bitwise() {
         let code = r#"
         int main(void) {
             return 1 | 2 & 3 ^ 4 << 1 >> 2;
@@ -303,6 +355,20 @@ mod tests {
             42;;
             return x + y + z;
         }"#;
+        parse_code(code, true);
+    }
+
+    #[test]
+    fn parse_inc_dec() {
+        let code = r#"
+        int main(void) {
+            int a = 1;
+            int b = 2;
+            int c = -++(a);
+            int d = !(b)--;
+            return (a == 2 && b == 1 && c == -2 && d == 0);
+        }
+        "#;
         parse_code(code, true);
     }
 
