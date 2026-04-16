@@ -117,6 +117,7 @@ impl Parser {
     }
 
     fn expression(&self, stream: &mut TokenStream, min_precedence: i32) -> Result<Expression> {
+        use BinaryOp::*;
         let mut left = self.factor(stream)?;
 
         while let Some(token) = stream.peek() {
@@ -138,16 +139,44 @@ impl Parser {
 
             let right = self.expression(stream, next_min_prec)?;
             left = match op {
-                BinaryOp::Assign => Expression::Assignment{
+                Assign => Expression::Assignment {
                     left: Box::new(left),
                     right: Box::new(right),
                     is_postfix: false,
                 },
+                AssignAdd | AssignSubtract | AssignMultiply | AssignDivide | AssignRemainder | AssignBitAnd
+                | AssignBitOr | AssignBitXor | AssignShiftLeft | AssignShiftRight =>
+                    Expression::Assignment {
+                        left: Box::new(left.clone()),
+                        right: Box::new(Expression::BinaryExpr(
+                            self.get_binary_op_from_compound(&op)?,
+                            Box::new(left),
+                            Box::new(right),
+                        )),
+                        is_postfix: false,
+                    },
                 _ => Expression::BinaryExpr(op, Box::new(left), Box::new(right)),
             };
         }
 
         Ok(left)
+    }
+
+    fn get_binary_op_from_compound(&self, compound_op: &BinaryOp) -> Result<BinaryOp> {
+        use BinaryOp::*;
+        match compound_op  {
+            AssignAdd => Ok(Add),
+            AssignSubtract => Ok(Subtract),
+            AssignMultiply => Ok(Multiply),
+            AssignDivide => Ok(Divide),
+            AssignRemainder => Ok(Remainder),
+            AssignBitAnd => Ok(BitAnd),
+            AssignBitOr => Ok(BitOr),
+            AssignBitXor => Ok(BitXor),
+            AssignShiftLeft => Ok(ShiftLeft),
+            AssignShiftRight => Ok(ShiftRight),
+            _ => Err(anyhow!("Unexpected operator for compound-operator argument")),
+        }
     }
 
     fn get_unary_op(&self, token_type: &TokenType) -> Option<UnaryOp> {
@@ -180,6 +209,16 @@ impl Parser {
             TokenType::GreaterEqual => Some(BinaryOp::GreaterEqual),
             TokenType::LessEqual => Some(BinaryOp::LessEqual),
             TokenType::Assign => Some(BinaryOp::Assign),
+            TokenType::AssignAdd => Some(BinaryOp::AssignAdd),
+            TokenType::AssignSub => Some(BinaryOp::AssignSubtract),
+            TokenType::AssignMul => Some(BinaryOp::AssignMultiply),
+            TokenType::AssignDiv => Some(BinaryOp::AssignDivide),
+            TokenType::AssignRemainder => Some(BinaryOp::AssignRemainder),
+            TokenType::AssignBitAnd => Some(BinaryOp::AssignBitAnd),
+            TokenType::AssignBitOr => Some(BinaryOp::AssignBitOr),
+            TokenType::AssignBitXor => Some(BinaryOp::AssignBitXor),
+            TokenType::AssignShiftLeft => Some(BinaryOp::AssignShiftLeft),
+            TokenType::AssignShiftRight => Some(BinaryOp::AssignShiftRight),
             _ => None,
         }
     }
@@ -187,7 +226,9 @@ impl Parser {
     fn get_precedence(&self, binary_op: &BinaryOp) -> i32 {
         use BinaryOp::*;
         match binary_op {
-            Assign => 1,
+            Assign | AssignAdd | AssignSubtract | AssignMultiply | AssignDivide
+            | AssignRemainder | AssignBitAnd | AssignBitOr | AssignBitXor | AssignShiftLeft
+            | AssignShiftRight => 1,
             LogicalOr => 15,
             LogicalAnd => 20,
             BitOr => 25,
@@ -229,7 +270,7 @@ impl Parser {
                         op,
                         Box::new(expr),
                         Box::new(Expression::IntegerConstant(1)),
-                        )),
+                    )),
                     is_postfix: false,
                 }
             }
@@ -367,6 +408,46 @@ mod tests {
             int c = -++(a);
             int d = !(b)--;
             return (a == 2 && b == 1 && c == -2 && d == 0);
+        }
+        "#;
+        parse_code(code, true);
+    }
+
+    #[test]
+    fn parse_compound_assignments() {
+        let code = r#"
+        int main(void) {
+            int a = 8;
+            int b = 3;
+            a += b;
+            a -= b;
+            a *= b;
+            a /= b;
+            a &= b;
+            a |= b;
+            a ^= b;
+            a <<= 1;
+            a >>= 1;
+            return a;
+        }
+        "#;
+        parse_code(code, true);
+    }
+
+    #[test]
+    fn parse_compound_chained() {
+        let code = r#"
+        int main(void) {
+            int a = 250;
+            int b = 200;
+            int c = 100;
+            int d = 75;
+            int e = -25;
+            int f = 0;
+            int x = 0;
+            x = a += b -= c *= d /= e %= f = -7;
+            return a == 2250 && b == 2000 && c == -1800 && d == -18 && e == -4 &&
+                   f == -7 && x == 2250;
         }
         "#;
         parse_code(code, true);

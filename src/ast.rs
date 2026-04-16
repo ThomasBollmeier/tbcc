@@ -5,7 +5,9 @@ pub struct Program {
 
 impl Program {
     pub fn new(function_definition: FunctionDefinition) -> Self {
-        Program { function_definition }
+        Program {
+            function_definition,
+        }
     }
 
     pub fn accept<R>(&self, visitor: &mut impl Visitor<R>) -> R {
@@ -23,7 +25,6 @@ pub struct FunctionDefinition {
 }
 
 impl FunctionDefinition {
-
     pub fn new(name: String, body: Vec<BlockItem>) -> Self {
         FunctionDefinition { name, body }
     }
@@ -102,7 +103,7 @@ pub enum Expression {
     Var(String),
     UnaryExpr(UnaryOp, Box<Expression>),
     BinaryExpr(BinaryOp, Box<Expression>, Box<Expression>),
-    Assignment{
+    Assignment {
         left: Box<Expression>,
         right: Box<Expression>,
         is_postfix: bool,
@@ -147,6 +148,16 @@ pub enum BinaryOp {
     GreaterEqual,
     LessEqual,
     Assign,
+    AssignAdd,
+    AssignSubtract,
+    AssignMultiply,
+    AssignDivide,
+    AssignRemainder,
+    AssignBitAnd,
+    AssignBitOr,
+    AssignBitXor,
+    AssignShiftLeft,
+    AssignShiftRight,
 }
 
 #[derive(Debug, Clone)]
@@ -159,12 +170,13 @@ impl From<&BinaryOp> for Associativity {
     fn from(value: &BinaryOp) -> Self {
         use BinaryOp::*;
         match value {
-            Assign => Associativity::Right,
+            Assign | AssignAdd | AssignSubtract | AssignMultiply | AssignDivide
+            | AssignRemainder | AssignBitAnd | AssignBitOr | AssignBitXor | AssignShiftLeft
+            | AssignShiftRight => Associativity::Right,
             _ => Associativity::Left,
         }
     }
 }
-
 
 pub trait Visitor<A> {
     fn visit_program(&mut self, program: &Program) -> A;

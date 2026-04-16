@@ -71,6 +71,16 @@ impl Lexer {
         lexer.add_token_type(TokenType::Less, r"<");
         lexer.add_token_type(TokenType::LessEqual, r"<=");
         lexer.add_token_type(TokenType::Assign, r"=");
+        lexer.add_token_type(TokenType::AssignAdd, r"\+=");
+        lexer.add_token_type(TokenType::AssignSub, r"\-=");
+        lexer.add_token_type(TokenType::AssignMul, r"\*=");
+        lexer.add_token_type(TokenType::AssignDiv, r"/=");
+        lexer.add_token_type(TokenType::AssignRemainder, r"%=");
+        lexer.add_token_type(TokenType::AssignBitAnd, r"&=");
+        lexer.add_token_type(TokenType::AssignBitOr, r"\|=");
+        lexer.add_token_type(TokenType::AssignBitXor, r"\^=");
+        lexer.add_token_type(TokenType::AssignShiftLeft, r"<<=");
+        lexer.add_token_type(TokenType::AssignShiftRight, r">>=");
         lexer.add_token_type(TokenType::IncrementPrefix, r"\+\+(?=[\w\(])");
         lexer.add_token_type(TokenType::IncrementPostfix, r"\+\+(?![\w\(])");
         lexer.add_token_type(TokenType::DecrementPrefix, r"\-\-(?=[\w\(])");
@@ -405,6 +415,57 @@ int main(void) {
         assert_eq!(tokens[10].lexeme, "--");
         assert_eq!(tokens[11].token_type, TokenType::Semicolon);
         assert_eq!(tokens[11].lexeme, ";");
+    }
+
+    #[test]
+    fn scan_compound_assignments() {
+        let lexer = Lexer::new();
+        let code = "a += b; c -= d; e *= f; g /= h; i %= j; k &= l; m |= n; o ^= p; q <<= r; s >>= t;";
+
+        let tokens = lexer.scan_tokens(code).unwrap();
+
+        // Count assignment operators: 10 assignments, each with 3 tokens (identifier, operator, identifier) plus semicolons = 30 tokens
+        assert_eq!(tokens.len(), 40);
+
+        // Test += (plus equals)
+        assert_eq!(tokens[1].token_type, TokenType::AssignAdd);
+        assert_eq!(tokens[1].lexeme, "+=");
+
+        // Test -= (minus equals)
+        assert_eq!(tokens[5].token_type, TokenType::AssignSub);
+        assert_eq!(tokens[5].lexeme, "-=");
+
+        // Test *= (multiply equals)
+        assert_eq!(tokens[9].token_type, TokenType::AssignMul);
+        assert_eq!(tokens[9].lexeme, "*=");
+
+        // Test /= (divide equals)
+        assert_eq!(tokens[13].token_type, TokenType::AssignDiv);
+        assert_eq!(tokens[13].lexeme, "/=");
+
+        // Test %= (remainder equals)
+        assert_eq!(tokens[17].token_type, TokenType::AssignRemainder);
+        assert_eq!(tokens[17].lexeme, "%=");
+
+        // Test &= (bitwise and equals)
+        assert_eq!(tokens[21].token_type, TokenType::AssignBitAnd);
+        assert_eq!(tokens[21].lexeme, "&=");
+
+        // Test |= (bitwise or equals)
+        assert_eq!(tokens[25].token_type, TokenType::AssignBitOr);
+        assert_eq!(tokens[25].lexeme, "|=");
+
+        // Test ^= (bitwise xor equals)
+        assert_eq!(tokens[29].token_type, TokenType::AssignBitXor);
+        assert_eq!(tokens[29].lexeme, "^=");
+
+        // Test <<= (shift left equals)
+        assert_eq!(tokens[33].token_type, TokenType::AssignShiftLeft);
+        assert_eq!(tokens[33].lexeme, "<<=");
+
+        // Test >>= (shift right equals)
+        assert_eq!(tokens[37].token_type, TokenType::AssignShiftRight);
+        assert_eq!(tokens[37].lexeme, ">>=");
     }
 
 }
