@@ -1,4 +1,4 @@
-use crate::ast::Statement::Return;
+use crate::ast::Statement::{IfStatement, Return};
 use crate::ast::{
     Associativity, BinaryOp, BlockItem, Declaration, Expression, FunctionDefinition, Program,
     Statement, UnaryOp,
@@ -92,10 +92,38 @@ impl Parser {
             Some(token) => match token.token_type {
                 TokenType::Return => self.return_statement(stream),
                 TokenType::Semicolon => self.null_statement(stream),
+                TokenType::If => self.if_statement(stream),
                 _ => self.expression_statement(stream),
             },
             None => Err(anyhow!("Unexpected end of statement")),
         }
+    }
+
+    fn if_statement(&self, stream: &mut TokenStream) -> Result<Statement> {
+        self.expect(stream, TokenType::If)?;
+        self.expect(stream, TokenType::LeftParen)?;
+        let condition = self.expression(stream, 0)?;
+        self.expect(stream, TokenType::RightParen)?;
+        let then_branch = self.statement(stream)?;
+
+        let else_opt = stream.peek();
+        let else_branch = if let Some(token) = else_opt {
+            if token.token_type == TokenType::Else {
+                stream.advance();
+                let else_branch = self.statement(stream)?;
+                Some(else_branch)
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+
+        Ok(IfStatement {
+            condition,
+            then_branch: Box::new(then_branch),
+            else_branch: else_branch.map(Box::new),
+        })
     }
 
     fn expression_statement(&self, stream: &mut TokenStream) -> Result<Statement> {
@@ -131,6 +159,14 @@ impl Parser {
             }
             stream.advance(); // consume the operator
 
+            let then_expr_opt = if op == Conditional {
+                let then_expr = self.expression(stream, 0)?;
+                self.expect(stream, TokenType::Colon)?;
+                Some(then_expr)
+            } else {
+                None
+            };
+
             let assoc = Associativity::from(&op);
             let next_min_prec = match assoc {
                 Associativity::Left => prec + 1,
@@ -144,17 +180,27 @@ impl Parser {
                     right: Box::new(right),
                     is_postfix: false,
                 },
-                AssignAdd | AssignSubtract | AssignMultiply | AssignDivide | AssignRemainder | AssignBitAnd
-                | AssignBitOr | AssignBitXor | AssignShiftLeft | AssignShiftRight =>
-                    Expression::Assignment {
-                        left: Box::new(left.clone()),
-                        right: Box::new(Expression::BinaryExpr(
-                            self.get_binary_op_from_compound(&op)?,
-                            Box::new(left),
-                            Box::new(right),
-                        )),
-                        is_postfix: false,
-                    },
+                Conditional => {
+                    let then_expr = then_expr_opt.ok_or_else(|| {
+                        anyhow!("Expected then-expression for conditional operator")
+                    })?;
+                    Expression::ConditionalExpr {
+                        condition: Box::new(left),
+                        then_expr: Box::new(then_expr),
+                        else_expr: Box::new(right),
+                    }
+                }
+                AssignAdd | AssignSubtract | AssignMultiply | AssignDivide | AssignRemainder
+                | AssignBitAnd | AssignBitOr | AssignBitXor | AssignShiftLeft
+                | AssignShiftRight => Expression::Assignment {
+                    left: Box::new(left.clone()),
+                    right: Box::new(Expression::BinaryExpr(
+                        self.get_binary_op_from_compound(&op)?,
+                        Box::new(left),
+                        Box::new(right),
+                    )),
+                    is_postfix: false,
+                },
                 _ => Expression::BinaryExpr(op, Box::new(left), Box::new(right)),
             };
         }
@@ -164,7 +210,7 @@ impl Parser {
 
     fn get_binary_op_from_compound(&self, compound_op: &BinaryOp) -> Result<BinaryOp> {
         use BinaryOp::*;
-        match compound_op  {
+        match compound_op {
             AssignAdd => Ok(Add),
             AssignSubtract => Ok(Subtract),
             AssignMultiply => Ok(Multiply),
@@ -175,7 +221,9 @@ impl Parser {
             AssignBitXor => Ok(BitXor),
             AssignShiftLeft => Ok(ShiftLeft),
             AssignShiftRight => Ok(ShiftRight),
-            _ => Err(anyhow!("Unexpected operator for compound-operator argument")),
+            _ => Err(anyhow!(
+                "Unexpected operator for compound-operator argument"
+            )),
         }
     }
 
@@ -219,6 +267,7 @@ impl Parser {
             TokenType::AssignBitXor => Some(BinaryOp::AssignBitXor),
             TokenType::AssignShiftLeft => Some(BinaryOp::AssignShiftLeft),
             TokenType::AssignShiftRight => Some(BinaryOp::AssignShiftRight),
+            TokenType::QuestionMark => Some(BinaryOp::Conditional),
             _ => None,
         }
     }
@@ -229,6 +278,7 @@ impl Parser {
             Assign | AssignAdd | AssignSubtract | AssignMultiply | AssignDivide
             | AssignRemainder | AssignBitAnd | AssignBitOr | AssignBitXor | AssignShiftLeft
             | AssignShiftRight => 1,
+            Conditional => 5,
             LogicalOr => 15,
             LogicalAnd => 20,
             BitOr => 25,
@@ -448,6 +498,45 @@ mod tests {
             x = a += b -= c *= d /= e %= f = -7;
             return a == 2250 && b == 2000 && c == -1800 && d == -18 && e == -4 &&
                    f == -7 && x == 2250;
+        }
+        "#;
+        parse_code(code, true);
+    }
+
+    #[test]
+    fn parse_if() {
+        let code = r#"
+        int main(void) {
+            int everything = 1;
+            if (everything)
+                return 42;
+        }
+        "#;
+        parse_code(code, true);
+    }
+
+    #[test]
+    fn parse_if_else() {
+        let code = r#"
+        int main(void) {
+            int everything = 0;
+            if (everything)
+                return 42;
+            else
+                return 23;
+        }
+        "#;
+        parse_code(code, true);
+    }
+
+    #[test]
+    fn parse_conditional() {
+        let code = r#"
+        int main(void) {
+            int everything = 1;
+            int beast = 0;
+            int answer = !everything ? beast ? 666 : 23 : 42;
+            return answer;
         }
         "#;
         parse_code(code, true);

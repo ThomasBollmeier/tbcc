@@ -163,6 +163,7 @@ impl TackyEmitter {
                 instructions
             }
             Statement::Null => vec![],
+            _ => todo!("Unsupported statement type {:?}", stmt),
         }
     }
 
@@ -290,6 +291,7 @@ impl TackyEmitter {
                 }
             }
             Expression::Var(name) => Value::Variable(name.clone()),
+            _ => todo!("Unsupported expression type {:?}", expr),
         }
     }
 

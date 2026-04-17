@@ -85,6 +85,11 @@ pub enum Statement {
     Return(Expression),
     Expression(Expression),
     Null,
+    IfStatement {
+        condition: Expression,
+        then_branch: Box<Statement>,
+        else_branch: Option<Box<Statement>>,
+    },
 }
 
 impl Statement {
@@ -108,6 +113,11 @@ pub enum Expression {
         right: Box<Expression>,
         is_postfix: bool,
     },
+    ConditionalExpr {
+        condition: Box<Expression>,
+        then_expr: Box<Expression>,
+        else_expr: Box<Expression>,
+    }
 }
 
 impl Expression {
@@ -127,7 +137,7 @@ pub enum UnaryOp {
     Not,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum BinaryOp {
     Add,
     Subtract,
@@ -158,6 +168,7 @@ pub enum BinaryOp {
     AssignBitXor,
     AssignShiftLeft,
     AssignShiftRight,
+    Conditional, // ?:
 }
 
 #[derive(Debug, Clone)]
@@ -172,7 +183,7 @@ impl From<&BinaryOp> for Associativity {
         match value {
             Assign | AssignAdd | AssignSubtract | AssignMultiply | AssignDivide
             | AssignRemainder | AssignBitAnd | AssignBitOr | AssignBitXor | AssignShiftLeft
-            | AssignShiftRight => Associativity::Right,
+            | AssignShiftRight | Conditional => Associativity::Right,
             _ => Associativity::Left,
         }
     }

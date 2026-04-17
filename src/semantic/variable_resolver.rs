@@ -60,6 +60,7 @@ impl VisitorMut<Result<()>> for VariableResolver {
                 expr.accept_mut(self)?;
             }
             Statement::Null => {}
+            _ => todo!("Unsupported statement type {:?}", stmt),
         }
 
         Ok(())
