@@ -47,6 +47,10 @@ pub enum TokenType {
     IncrementPostfix,
     DecrementPrefix,
     DecrementPostfix,
+    If,
+    Else,
+    QuestionMark,
+    Colon
 }
 
 #[derive(Debug, Clone, PartialEq)]

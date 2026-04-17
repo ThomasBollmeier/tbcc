@@ -85,10 +85,14 @@ impl Lexer {
         lexer.add_token_type(TokenType::IncrementPostfix, r"\+\+(?![\w\(])");
         lexer.add_token_type(TokenType::DecrementPrefix, r"\-\-(?=[\w\(])");
         lexer.add_token_type(TokenType::DecrementPostfix, r"\-\-(?![\w\(])");
+        lexer.add_token_type(TokenType::QuestionMark, r"\?");
+        lexer.add_token_type(TokenType::Colon, r":");
 
         lexer.keywords.insert("int".to_string(), TokenType::Int);
         lexer.keywords.insert("void".to_string(), TokenType::Void);
         lexer.keywords.insert("return".to_string(), TokenType::Return);
+        lexer.keywords.insert("if".to_string(), TokenType::If);
+        lexer.keywords.insert("else".to_string(), TokenType::Else);
 
         lexer
     }
@@ -466,6 +470,20 @@ int main(void) {
         // Test >>= (shift right equals)
         assert_eq!(tokens[37].token_type, TokenType::AssignShiftRight);
         assert_eq!(tokens[37].lexeme, ">>=");
+    }
+
+    #[test]
+    fn scan_if_else_question_mark_colon() {
+        let lexer = Lexer::new();
+        let code = "if else ?:";
+
+        let tokens = lexer.scan_tokens(code).unwrap();
+
+        assert_eq!(tokens.len(), 4);
+        assert_eq!(tokens[0].token_type, TokenType::If);
+        assert_eq!(tokens[1].token_type, TokenType::Else);
+        assert_eq!(tokens[2].token_type, TokenType::QuestionMark);
+        assert_eq!(tokens[3].token_type, TokenType::Colon);
     }
 
 }
