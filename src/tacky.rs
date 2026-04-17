@@ -163,8 +163,49 @@ impl TackyEmitter {
                 instructions
             }
             Statement::Null => vec![],
-            _ => todo!("Unsupported statement type {:?}", stmt),
+            Statement::IfStatement {
+                condition,
+                then_branch,
+                else_branch,
+            } => self.emit_if_statement(condition, then_branch, else_branch),
         }
+    }
+
+    fn emit_if_statement(
+        &mut self,
+        condition: &Expression,
+        then_branch: &Box<Statement>,
+        else_branch: &Option<Box<Statement>>,
+    ) -> Vec<Instruction> {
+        let mut instructions = vec![];
+        let end_label = self.make_label("if_end");
+        let condition_value = self.emit_expression(condition, &mut instructions);
+
+        if let Some(else_branch) = else_branch {
+            let else_label = self.make_label("if_else");
+            instructions.push(Instruction::JumpIfZero {
+                condition: condition_value,
+                target: else_label.clone(),
+            });
+
+            instructions.extend(self.emit_statement(then_branch));
+            instructions.push(Instruction::Jump {
+                target: end_label.clone(),
+            });
+            instructions.push(Instruction::Label(else_label));
+            instructions.extend(self.emit_statement(else_branch));
+        } else {
+            instructions.push(Instruction::JumpIfZero {
+                condition: condition_value,
+                target: end_label.clone(),
+            });
+
+            instructions.extend(self.emit_statement(then_branch));
+        }
+
+        instructions.push(Instruction::Label(end_label));
+
+        instructions
     }
 
     fn emit_expression(&mut self, expr: &Expression, instructions: &mut Vec<Instruction>) -> Value {
@@ -283,15 +324,46 @@ impl TackyEmitter {
                         src: dst.clone(),
                         dst: original_value.clone(),
                     });
-                    instructions.push(Instruction::Copy {
-                        src,
-                        dst,
-                    });
+                    instructions.push(Instruction::Copy { src, dst });
                     original_value
                 }
             }
             Expression::Var(name) => Value::Variable(name.clone()),
-            _ => todo!("Unsupported expression type {:?}", expr),
+            Expression::ConditionalExpr {
+                condition,
+                then_expr,
+                else_expr,
+            } => {
+                let end_label = self.make_label("cond_end");
+                let else_label = self.make_label("cond_else");
+                let result = Value::Variable(self.make_temp_var());
+
+                let condition_value = self.emit_expression(condition, instructions);
+                instructions.push(Instruction::JumpIfZero {
+                    condition: condition_value,
+                    target: else_label.clone(),
+                });
+
+                let then_value = self.emit_expression(then_expr, instructions);
+                instructions.push(Instruction::Copy {
+                    src: then_value,
+                    dst: result.clone(),
+                });
+                instructions.push(Instruction::Jump {
+                    target: end_label.clone(),
+                });
+
+                instructions.push(Instruction::Label(else_label));
+                let else_value = self.emit_expression(else_expr, instructions);
+                instructions.push(Instruction::Copy {
+                    src: else_value,
+                    dst: result.clone(),
+                });
+
+                instructions.push(Instruction::Label(end_label));
+
+                result
+            }
         }
     }
 
@@ -725,5 +797,133 @@ mod tests {
         assert_eq!(expected, actual);
     }
 
+    #[test]
+    fn emit_if_statement_without_else() {
+        use Instruction::*;
 
+        let mut emitter = TackyEmitter::new(NameCreator::new_ref());
+        let stmt = Statement::IfStatement {
+            condition: Expression::IntegerConstant(1),
+            then_branch: Box::new(Statement::Return(Expression::IntegerConstant(42))),
+            else_branch: None,
+        };
+
+        let expected = vec![
+            JumpIfZero {
+                condition: IntegerConstant(1),
+                target: "if_end_0".to_string(),
+            },
+            Return(IntegerConstant(42)),
+            Label("if_end_0".to_string()),
+        ];
+
+        let actual = emitter.emit_statement(&stmt);
+        assert_eq!(expected, actual);
+    }
+
+    #[test]
+    fn emit_if_statement_with_else() {
+        use Expression::*;
+        use Instruction::*;
+
+        let mut emitter = TackyEmitter::new(NameCreator::new_ref());
+        let stmt = Statement::IfStatement {
+            condition: IntegerConstant(1),
+            then_branch: Box::new(Statement::Return(IntegerConstant(42))),
+            else_branch: Some(Box::new(Statement::Return(IntegerConstant(0)))),
+        };
+
+        let expected = vec![
+            JumpIfZero {
+                condition: Value::IntegerConstant(1),
+                target: "if_else_0".to_string(),
+            },
+            Return(Value::IntegerConstant(42)),
+            Jump {
+                target: "if_end_0".to_string(),
+            },
+            Label("if_else_0".to_string()),
+            Return(Value::IntegerConstant(0)),
+            Label("if_end_0".to_string()),
+        ];
+
+        let actual = emitter.emit_statement(&stmt);
+        assert_eq!(expected, actual);
+    }
+
+    #[test]
+    fn emit_conditional_expression_simple() {
+        use Instruction::*;
+        use Value::*;
+
+        let mut emitter = TackyEmitter::new(NameCreator::new_ref());
+        let stmt = Statement::Return(Expression::ConditionalExpr {
+            condition: Box::new(Expression::IntegerConstant(1)),
+            then_expr: Box::new(Expression::IntegerConstant(42)),
+            else_expr: Box::new(Expression::IntegerConstant(0)),
+        });
+
+        let expected = vec![
+            JumpIfZero {
+                condition: IntegerConstant(1),
+                target: "cond_else_0".to_string(),
+            },
+            Copy {
+                src: IntegerConstant(42),
+                dst: Variable("tmp.0".to_string()),
+            },
+            Jump {
+                target: "cond_end_0".to_string(),
+            },
+            Label("cond_else_0".to_string()),
+            Copy {
+                src: IntegerConstant(0),
+                dst: Variable("tmp.0".to_string()),
+            },
+            Label("cond_end_0".to_string()),
+            Return(Variable("tmp.0".to_string())),
+        ];
+
+        let actual = emitter.emit_statement(&stmt);
+        assert_eq!(expected, actual);
+    }
+
+    #[test]
+    fn emit_nested_if_dangling_else_binds_to_inner_if() {
+        use Instruction::*;
+        use Value::*;
+
+        let mut emitter = TackyEmitter::new(NameCreator::new_ref());
+        let stmt = Statement::IfStatement {
+            condition: Expression::Var("a".to_string()),
+            then_branch: Box::new(Statement::IfStatement {
+                condition: Expression::Var("b".to_string()),
+                then_branch: Box::new(Statement::Return(Expression::IntegerConstant(1))),
+                else_branch: Some(Box::new(Statement::Return(Expression::IntegerConstant(2)))),
+            }),
+            else_branch: None,
+        };
+
+        let expected = vec![
+            JumpIfZero {
+                condition: Variable("a".to_string()),
+                target: "if_end_0".to_string(),
+            },
+            JumpIfZero {
+                condition: Variable("b".to_string()),
+                target: "if_else_0".to_string(),
+            },
+            Return(IntegerConstant(1)),
+            Jump {
+                target: "if_end_1".to_string(),
+            },
+            Label("if_else_0".to_string()),
+            Return(IntegerConstant(2)),
+            Label("if_end_1".to_string()),
+            Label("if_end_0".to_string()),
+        ];
+
+        let actual = emitter.emit_statement(&stmt);
+        assert_eq!(expected, actual);
+    }
 }
