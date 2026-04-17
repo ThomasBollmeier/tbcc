@@ -60,7 +60,17 @@ impl VisitorMut<Result<()>> for VariableResolver {
                 expr.accept_mut(self)?;
             }
             Statement::Null => {}
-            _ => todo!("Unsupported statement type {:?}", stmt),
+            Statement::IfStatement {
+                condition,
+                then_branch,
+                else_branch,
+            } => {
+                condition.accept_mut(self)?;
+                then_branch.accept_mut(self)?;
+                if let Some(else_branch) = else_branch {
+                    else_branch.accept_mut(self)?;
+                }
+            }
         }
 
         Ok(())
@@ -94,6 +104,15 @@ impl VisitorMut<Result<()>> for VariableResolver {
             BinaryExpr(_, left, right) => {
                 left.accept_mut(self)?;
                 right.accept_mut(self)?;
+            }
+            ConditionalExpr {
+                condition,
+                then_expr,
+                else_expr,
+            } => {
+                condition.accept_mut(self)?;
+                then_expr.accept_mut(self)?;
+                else_expr.accept_mut(self)?;
             }
             _ => {}
         }
