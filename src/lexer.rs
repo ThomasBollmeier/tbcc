@@ -93,6 +93,7 @@ impl Lexer {
         lexer.keywords.insert("return".to_string(), TokenType::Return);
         lexer.keywords.insert("if".to_string(), TokenType::If);
         lexer.keywords.insert("else".to_string(), TokenType::Else);
+        lexer.keywords.insert("goto".to_string(), TokenType::Goto);
 
         lexer
     }
@@ -484,6 +485,29 @@ int main(void) {
         assert_eq!(tokens[1].token_type, TokenType::Else);
         assert_eq!(tokens[2].token_type, TokenType::QuestionMark);
         assert_eq!(tokens[3].token_type, TokenType::Colon);
+    }
+
+    #[test]
+    fn scan_goto_and_label() {
+        let lexer = Lexer::new();
+        let code = "goto end; end: return 42;";
+
+        let tokens = lexer.scan_tokens(code).unwrap();
+        assert_eq!(tokens.len(), 8);
+        assert_eq!(tokens[0].token_type, TokenType::Goto);
+        assert_eq!(tokens[0].lexeme, "goto");
+        assert_eq!(tokens[1].token_type, TokenType::Identifier);
+        assert_eq!(tokens[1].lexeme, "end");
+        assert_eq!(tokens[2].token_type, TokenType::Semicolon);
+        assert_eq!(tokens[3].token_type, TokenType::Identifier);
+        assert_eq!(tokens[3].lexeme, "end");
+        assert_eq!(tokens[4].token_type, TokenType::Colon);
+        assert_eq!(tokens[5].token_type, TokenType::Return);
+        assert_eq!(tokens[5].lexeme, "return");
+        assert_eq!(tokens[6].token_type, TokenType::IntegerConstant);
+        assert_eq!(tokens[6].value, Some(TokenValue::Integer(42)));
+        assert_eq!(tokens[6].lexeme, "42");
+        assert_eq!(tokens[7].token_type, TokenType::Semicolon); 
     }
 
 }

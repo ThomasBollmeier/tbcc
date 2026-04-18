@@ -90,6 +90,11 @@ pub enum Statement {
         then_branch: Box<Statement>,
         else_branch: Option<Box<Statement>>,
     },
+    GotoStatement(String),
+    LabeledStatement {
+        label: String,
+        statement: Box<Statement>,
+    }
 }
 
 impl Statement {

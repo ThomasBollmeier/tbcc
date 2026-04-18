@@ -1,18 +1,18 @@
 use crate::ast::{Declaration, Expression, FunctionDefinition, Program, Statement, VisitorMut};
-use crate::semantic::name_creator::NameCreatorRef;
+use crate::semantic::name_generator::NameGeneratorRef;
 use crate::semantic::scope::{Scope, ScopeRef};
 use anyhow::{Result, anyhow};
 
 pub struct VariableResolver {
-    name_creator: NameCreatorRef,
+    var_name_generator: NameGeneratorRef,
     current_scope: ScopeRef,
 }
 
 impl VariableResolver {
-    pub fn new(name_creator: NameCreatorRef) -> Self {
+    pub fn new(var_name_generator: NameGeneratorRef) -> Self {
         Self {
-            name_creator: name_creator.clone(),
-            current_scope: Scope::new_ref(None, name_creator),
+            var_name_generator: var_name_generator.clone(),
+            current_scope: Scope::new_ref(None, var_name_generator),
         }
     }
 
@@ -27,8 +27,10 @@ impl VisitorMut<Result<()>> for VariableResolver {
     }
 
     fn visit_function_definition(&mut self, func_def: &mut FunctionDefinition) -> Result<()> {
-        self.current_scope =
-            Scope::new_ref(Some(self.current_scope.clone()), self.name_creator.clone());
+        self.current_scope = Scope::new_ref(
+            Some(self.current_scope.clone()),
+            self.var_name_generator.clone(),
+        );
 
         for item in &mut func_def.body {
             item.accept_mut(self)?
@@ -41,7 +43,7 @@ impl VisitorMut<Result<()>> for VariableResolver {
     }
 
     fn visit_declaration(&mut self, decl: &mut Declaration) -> Result<()> {
-        let unique_name = self.current_scope.borrow_mut().add_var(&decl.name)?;
+        let unique_name = self.current_scope.borrow_mut().add(&decl.name)?;
         decl.name = unique_name;
 
         if let Some(init_expr) = &mut decl.init_expr {
@@ -59,7 +61,6 @@ impl VisitorMut<Result<()>> for VariableResolver {
             Statement::Return(expr) => {
                 expr.accept_mut(self)?;
             }
-            Statement::Null => {}
             Statement::IfStatement {
                 condition,
                 then_branch,
@@ -71,6 +72,13 @@ impl VisitorMut<Result<()>> for VariableResolver {
                     else_branch.accept_mut(self)?;
                 }
             }
+            Statement::LabeledStatement {
+                label: _,
+                statement,
+            } => {
+                statement.accept_mut(self)?;
+            }
+            _ => {}
         }
 
         Ok(())
@@ -92,7 +100,7 @@ impl VisitorMut<Result<()>> for VariableResolver {
                 right.accept_mut(self)?;
             }
             Var(name) => {
-                if let Some(unique_name) = self.current_scope.borrow().get_var_unique_name(name) {
+                if let Some(unique_name) = self.current_scope.borrow().get_unique_name(name) {
                     *name = unique_name;
                 } else {
                     return Err(anyhow!("Variable `{name}` is not defined"));
@@ -127,7 +135,7 @@ mod tests {
     use crate::ast::{BlockItem, Expression, Statement};
     use crate::lexer::Lexer;
     use crate::parser::Parser;
-    use crate::semantic::name_creator::NameCreator;
+    use crate::semantic::name_generator::make_var_name_generator;
 
     #[test]
     fn resolves_variable_names_in_declarations_and_usages() {
@@ -235,7 +243,7 @@ mod tests {
         let err = result.expect_err("Expected duplicate declaration error");
         assert!(
             err.to_string()
-                .contains("Variable `x` already exists in current scope")
+                .contains("'x' already exists in current scope")
         );
     }
 
@@ -263,8 +271,8 @@ mod tests {
         let tokens = lexer.scan_tokens(code)?;
         let mut program = parser.parse(tokens)?;
 
-        let name_creator = NameCreator::new_ref();
-        let mut resolver = VariableResolver::new(name_creator);
+        let var_name_generator = make_var_name_generator(); 
+        let mut resolver = VariableResolver::new(var_name_generator);
         resolver.resolve(&mut program)?;
 
         Ok(program)

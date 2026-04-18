@@ -87,16 +87,49 @@ impl Parser {
     }
 
     fn statement(&self, stream: &mut TokenStream) -> Result<Statement> {
+        if let Some(label) = self.get_label(stream) {
+            let stmt = self.statement(stream)?;
+            return Ok(Statement::LabeledStatement {
+                label,
+                statement: Box::new(stmt),
+            });
+        }
+
         let next_token = stream.peek();
         match next_token {
             Some(token) => match token.token_type {
                 TokenType::Return => self.return_statement(stream),
                 TokenType::Semicolon => self.null_statement(stream),
                 TokenType::If => self.if_statement(stream),
+                TokenType::Goto => self.goto_statement(stream),
                 _ => self.expression_statement(stream),
             },
             None => Err(anyhow!("Unexpected end of statement")),
         }
+    }
+
+    fn get_label(&self, stream: &mut TokenStream) -> Option<String> {
+        let next_tokens = stream.peek_next_n(2);
+
+        if next_tokens.len() == 2
+            && next_tokens[0].token_type == TokenType::Identifier
+            && next_tokens[1].token_type == TokenType::Colon
+        {
+            let label = next_tokens[0].lexeme.clone();
+            stream.advance(); // consume the identifier
+            stream.advance(); // consume the colon
+            Some(label)
+        } else {
+            None
+        }
+    }
+
+    fn goto_statement(&self, stream: &mut TokenStream) -> Result<Statement> {
+        self.expect(stream, TokenType::Goto)?;
+        let target_token = self.expect(stream, TokenType::Identifier)?;
+        let target = target_token.lexeme;
+        self.expect(stream, TokenType::Semicolon)?;
+        Ok(Statement::GotoStatement(target))
     }
 
     fn if_statement(&self, stream: &mut TokenStream) -> Result<Statement> {
@@ -537,6 +570,19 @@ mod tests {
             int beast = 0;
             int answer = !everything ? beast ? 666 : 23 : 42;
             return answer;
+        }
+        "#;
+        parse_code(code, true);
+    }
+
+    #[test]
+    fn parse_goto() {
+        let code = r#"
+        int main(void) {
+            goto everything;
+            return 666;
+        everything:
+            return 42;
         }
         "#;
         parse_code(code, true);

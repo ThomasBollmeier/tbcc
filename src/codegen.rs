@@ -180,8 +180,14 @@ mod tests {
     use crate::assembly;
     use crate::lexer::Lexer;
     use crate::parser::Parser;
-    use crate::semantic::NameCreator;
+    use crate::semantic;
     use crate::tacky::TackyEmitter;
+
+    fn make_emitter() -> TackyEmitter {
+        let label_name_gen = semantic::make_label_name_generator();
+        let tmp_var_name_gen = semantic::make_temp_var_name_generator();
+        TackyEmitter::new(label_name_gen, tmp_var_name_gen)
+    }
 
     #[test]
     fn creates_asm_program_ok() {
@@ -193,7 +199,7 @@ mod tests {
         let tokens = lexer.scan_tokens(code).expect("Failed to scan tokens");
         let program = parser.parse(tokens).expect("Failed to parse program");
 
-        let mut tacky_emitter = TackyEmitter::new(NameCreator::new_ref());
+        let mut tacky_emitter = make_emitter();
         let tacky_program = tacky_emitter
             .emit_program(&program)
             .expect("Failed to emit tacky program");
@@ -219,7 +225,7 @@ mod tests {
         let tokens = lexer.scan_tokens(code).expect("Failed to scan tokens");
         let program = parser.parse(tokens).expect("Failed to parse program");
 
-        let mut tacky_emitter = TackyEmitter::new(NameCreator::new_ref());
+        let mut tacky_emitter = make_emitter();
         let tacky_program = tacky_emitter
             .emit_program(&program)
             .expect("Failed to emit tacky program");

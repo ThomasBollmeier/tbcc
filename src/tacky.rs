@@ -1,11 +1,10 @@
 use crate::ast::{
     BinaryOp, BlockItem, Declaration, Expression, FunctionDefinition, Statement, UnaryOp,
 };
-use crate::semantic::NameCreatorRef;
+use crate::semantic::NameGeneratorRef;
 use crate::tacky::Instruction::Unary;
 use crate::tacky::Value::IntegerConstant;
 use anyhow::Result;
-use std::collections::HashMap;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Program {
@@ -85,18 +84,15 @@ pub enum BinaryOperator {
     LessEqual,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct TackyEmitter {
-    name_creator: NameCreatorRef,
-    label_counters: HashMap<String, usize>,
+    label_name_generator: NameGeneratorRef,
+    tmp_var_name_generator: NameGeneratorRef,
 }
 
 impl TackyEmitter {
-    pub fn new(name_creator: NameCreatorRef) -> TackyEmitter {
-        TackyEmitter {
-            name_creator,
-            label_counters: HashMap::new(),
-        }
+    pub fn new(label_name_generator: NameGeneratorRef, tmp_var_name_generator: NameGeneratorRef) -> TackyEmitter {
+        TackyEmitter { label_name_generator, tmp_var_name_generator }
     }
 
     pub fn emit_program(&mut self, program: &crate::ast::Program) -> Result<Program> {
@@ -168,6 +164,14 @@ impl TackyEmitter {
                 then_branch,
                 else_branch,
             } => self.emit_if_statement(condition, then_branch, else_branch),
+            Statement::GotoStatement(label) => vec![Instruction::Jump {
+                target: label.clone(),
+            }],
+            Statement::LabeledStatement { label, statement } => {
+                let mut instructions = vec![Instruction::Label(label.clone())];
+                instructions.extend(self.emit_statement(statement));
+                instructions
+            }
         }
     }
 
@@ -400,26 +404,29 @@ impl TackyEmitter {
     }
 
     fn make_temp_var(&mut self) -> String {
-        self.name_creator.borrow_mut().make_temp_var_name()
+        self.tmp_var_name_generator.borrow_mut().make_unique_name("")
     }
 
     fn make_label(&mut self, prefix: &str) -> String {
-        let counter = self.label_counters.entry(prefix.to_string()).or_insert(0);
-        let label = format!("{}_{}", prefix, counter);
-        *counter += 1;
-        label
+        self.label_name_generator.borrow_mut().make_unique_name(prefix)
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::semantic::NameCreator;
+    use crate::semantic;
     use crate::tacky::UnaryOperator::{Complement, Negate};
+
+    fn make_emitter() -> TackyEmitter {
+        let label_name_generator = semantic::make_label_name_generator();
+        let tmp_var_name_generator = semantic::make_temp_var_name_generator();
+        TackyEmitter::new(label_name_generator, tmp_var_name_generator)
+    }
 
     #[test]
     fn emit_return() {
-        let mut emitter = TackyEmitter::new(NameCreator::new_ref());
+        let mut emitter = make_emitter();
         let stmt = Statement::Return(Expression::IntegerConstant(42));
         let expected = vec![Instruction::Return(IntegerConstant(42))];
         let actual = emitter.emit_statement(&stmt);
@@ -433,7 +440,7 @@ mod tests {
         use Instruction::*;
         use Value::*;
 
-        let mut emitter = TackyEmitter::new(NameCreator::new_ref());
+        let mut emitter = make_emitter();
         let stmt = Statement::Return(UnaryExpr(
             UnaryOp::Negate,
             Box::new(UnaryExpr(
@@ -474,7 +481,7 @@ mod tests {
         use Instruction::*;
         use Value::*;
 
-        let mut emitter = TackyEmitter::new(NameCreator::new_ref());
+        let mut emitter = make_emitter();
         let stmt = Statement::Return(BinaryExpr(
             BinaryOp::Add,
             Box::new(Expression::IntegerConstant(1)),
@@ -512,7 +519,7 @@ mod tests {
         use Instruction::*;
         use Value::*;
 
-        let mut emitter = TackyEmitter::new(NameCreator::new_ref());
+        let mut emitter = make_emitter();
         let stmt = Statement::Return(BinaryExpr(
             BinaryOp::ShiftLeft,
             Box::new(Expression::IntegerConstant(8)),
@@ -540,7 +547,7 @@ mod tests {
         use Instruction::*;
         use Value::*;
 
-        let mut emitter = TackyEmitter::new(NameCreator::new_ref());
+        let mut emitter = make_emitter();
         let stmt = Statement::Return(BinaryExpr(
             BinaryOp::ShiftRight,
             Box::new(Expression::IntegerConstant(16)),
@@ -567,7 +574,7 @@ mod tests {
         use Instruction::*;
         use Value::*;
 
-        let mut emitter = TackyEmitter::new(NameCreator::new_ref());
+        let mut emitter = make_emitter();
         let stmt = Statement::Return(BinaryExpr(
             BinaryOp::LogicalAnd,
             Box::new(Expression::IntegerConstant(1)),
@@ -609,7 +616,7 @@ mod tests {
         use Instruction::*;
         use Value::*;
 
-        let mut emitter = TackyEmitter::new(NameCreator::new_ref());
+        let mut emitter = make_emitter();
         let stmt = Statement::Return(BinaryExpr(
             BinaryOp::LogicalOr,
             Box::new(Expression::IntegerConstant(0)),
@@ -652,7 +659,7 @@ mod tests {
         use Instruction::*;
         use Value::*;
 
-        let mut emitter = TackyEmitter::new(NameCreator::new_ref());
+        let mut emitter = make_emitter();
         let stmt = Statement::Return(Assignment {
             left: Box::new(Var("a".to_string())),
             right: Box::new(BinaryExpr(
@@ -688,7 +695,7 @@ mod tests {
         use Instruction::*;
         use Value::*;
 
-        let mut emitter = TackyEmitter::new(NameCreator::new_ref());
+        let mut emitter = make_emitter();
         let stmt = Statement::Return(Assignment {
             left: Box::new(Var("a".to_string())),
             right: Box::new(BinaryExpr(
@@ -728,7 +735,7 @@ mod tests {
         use Instruction::*;
         use Value::*;
 
-        let mut emitter = TackyEmitter::new(NameCreator::new_ref());
+        let mut emitter = make_emitter();
         let stmt = Statement::Return(Assignment {
             left: Box::new(Var("a".to_string())),
             right: Box::new(BinaryExpr(
@@ -764,7 +771,7 @@ mod tests {
         use Instruction::*;
         use Value::*;
 
-        let mut emitter = TackyEmitter::new(NameCreator::new_ref());
+        let mut emitter = make_emitter();
         let stmt = Statement::Return(Assignment {
             left: Box::new(Var("a".to_string())),
             right: Box::new(BinaryExpr(
@@ -801,7 +808,7 @@ mod tests {
     fn emit_if_statement_without_else() {
         use Instruction::*;
 
-        let mut emitter = TackyEmitter::new(NameCreator::new_ref());
+        let mut emitter = make_emitter();
         let stmt = Statement::IfStatement {
             condition: Expression::IntegerConstant(1),
             then_branch: Box::new(Statement::Return(Expression::IntegerConstant(42))),
@@ -826,7 +833,7 @@ mod tests {
         use Expression::*;
         use Instruction::*;
 
-        let mut emitter = TackyEmitter::new(NameCreator::new_ref());
+        let mut emitter = make_emitter();
         let stmt = Statement::IfStatement {
             condition: IntegerConstant(1),
             then_branch: Box::new(Statement::Return(IntegerConstant(42))),
@@ -856,7 +863,7 @@ mod tests {
         use Instruction::*;
         use Value::*;
 
-        let mut emitter = TackyEmitter::new(NameCreator::new_ref());
+        let mut emitter = make_emitter();
         let stmt = Statement::Return(Expression::ConditionalExpr {
             condition: Box::new(Expression::IntegerConstant(1)),
             then_expr: Box::new(Expression::IntegerConstant(42)),
@@ -893,7 +900,7 @@ mod tests {
         use Instruction::*;
         use Value::*;
 
-        let mut emitter = TackyEmitter::new(NameCreator::new_ref());
+        let mut emitter = make_emitter();
         let stmt = Statement::IfStatement {
             condition: Expression::Var("a".to_string()),
             then_branch: Box::new(Statement::IfStatement {

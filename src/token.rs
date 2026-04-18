@@ -50,7 +50,8 @@ pub enum TokenType {
     If,
     Else,
     QuestionMark,
-    Colon
+    Colon,
+    Goto,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -106,6 +107,19 @@ impl TokenStream {
         self.tokens.get(self.position)
     }
 
+    pub fn peek_next_n(&self, n: usize) -> Vec<&Token> {
+        let mut ret = Vec::new();
+        for i in 0..n {
+            if let Some(token) = self.tokens.get(self.position + i) {
+                ret.push(token);
+            } else {
+                break;
+            }
+        }
+
+        ret
+    }
+
     pub fn peek_with_offset(&self, offset: usize) -> Option<&Token> {
         self.tokens.get(self.position + offset)
     }
@@ -116,5 +130,3 @@ impl TokenStream {
         result
     }
 }
-
-
