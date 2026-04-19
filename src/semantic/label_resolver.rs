@@ -1,4 +1,4 @@
-use crate::ast::{Declaration, Expression, FunctionDefinition, Program, Statement, VisitorMut};
+use crate::ast::{Block, Declaration, Expression, FunctionDefinition, Program, Statement, VisitorMut};
 use crate::semantic::name_generator::NameGeneratorRef;
 use crate::semantic::scope::{NamingData, Scope, ScopeRef};
 use anyhow::{Result, anyhow};
@@ -141,12 +141,20 @@ impl VisitorMut<Result<()>> for LabelResolver {
 
     fn visit_function_definition(&mut self, func_def: &mut FunctionDefinition) -> Result<()> {
         self.current_scope = Some(Scope::new_ref(None, self.label_name_generator.clone()));
-        for item in &mut func_def.body {
-            item.accept_mut(self)?
-        }
+        func_def.body.accept_mut(self)?;
         self.check_for_undeclared_labels()?;
         self.current_scope = None;
 
+        Ok(())
+    }
+
+    fn visit_block(&mut self, block: &mut Block) -> Result<()> {
+        for item in &mut block.items {
+            match item {
+                crate::ast::BlockItem::Declaration(decl) => decl.accept_mut(self)?,
+                crate::ast::BlockItem::Statement(stmt) => stmt.accept_mut(self)?,
+            }
+        }
         Ok(())
     }
 
@@ -207,7 +215,7 @@ mod tests {
         )
         .expect("Expected label resolver to succeed for label declared in if branch");
 
-        let body = &mut program.function_definition.body;
+        let body = &mut program.function_definition.body.items;
 
         let resolved_label = match &body[0] {
             BlockItem::Statement(Statement::IfStatement {

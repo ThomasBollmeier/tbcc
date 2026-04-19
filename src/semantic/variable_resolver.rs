@@ -1,4 +1,4 @@
-use crate::ast::{Declaration, Expression, FunctionDefinition, Program, Statement, VisitorMut};
+use crate::ast::{Block, Declaration, Expression, FunctionDefinition, Program, Statement, VisitorMut};
 use crate::semantic::name_generator::NameGeneratorRef;
 use crate::semantic::scope::{Scope, ScopeRef};
 use anyhow::{Result, anyhow};
@@ -19,6 +19,18 @@ impl VariableResolver {
     pub fn resolve(&mut self, program: &mut Program) -> Result<()> {
         program.accept_mut(self)
     }
+
+    fn open_scope(&mut self) {
+        self.current_scope = Scope::new_ref(
+            Some(self.current_scope.clone()),
+            self.var_name_generator.clone(),
+        );
+    }
+
+    fn close_scope(&mut self) {
+        let parent = self.current_scope.borrow().get_parent().unwrap();
+        self.current_scope = parent;
+    }
 }
 
 impl VisitorMut<Result<()>> for VariableResolver {
@@ -27,18 +39,22 @@ impl VisitorMut<Result<()>> for VariableResolver {
     }
 
     fn visit_function_definition(&mut self, func_def: &mut FunctionDefinition) -> Result<()> {
-        self.current_scope = Scope::new_ref(
-            Some(self.current_scope.clone()),
-            self.var_name_generator.clone(),
-        );
+        func_def.body.accept_mut(self)?;
 
-        for item in &mut func_def.body {
-            item.accept_mut(self)?
+        Ok(())
+    }
+
+    fn visit_block(&mut self, block: &mut Block) -> Result<()> {
+        self.open_scope();
+
+        for item in &mut block.items {
+            match item {
+                crate::ast::BlockItem::Declaration(decl) => decl.accept_mut(self)?,
+                crate::ast::BlockItem::Statement(stmt) => stmt.accept_mut(self)?,
+            }
         }
 
-        let parent = self.current_scope.borrow().get_parent().unwrap();
-        self.current_scope = parent;
-
+        self.close_scope();
         Ok(())
     }
 
@@ -60,6 +76,9 @@ impl VisitorMut<Result<()>> for VariableResolver {
             }
             Statement::Return(expr) => {
                 expr.accept_mut(self)?;
+            }
+            Statement::CompoundStatement(block) => {
+                block.accept_mut(self)?;
             }
             Statement::IfStatement {
                 condition,
@@ -151,7 +170,7 @@ mod tests {
         )
         .expect("Expected variable resolver to succeed");
 
-        let body = &mut program.function_definition.body;
+        let body = &mut program.function_definition.body.items;
 
         match &body[0] {
             BlockItem::Declaration(decl) => assert_eq!(decl.name, "var.x.0"),
@@ -233,9 +252,11 @@ mod tests {
         let result = resolve_code(
             r#"
             int main(void) {
-                int x = 1;
-                int x = 2;
-                return x;
+                {
+                    int x = 1;
+                    int x = 2;
+                }
+                return 1;
             }
             "#,
         );

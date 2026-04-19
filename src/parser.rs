@@ -1,8 +1,5 @@
 use crate::ast::Statement::{IfStatement, Return};
-use crate::ast::{
-    Associativity, BinaryOp, BlockItem, Declaration, Expression, FunctionDefinition, Program,
-    Statement, UnaryOp,
-};
+use crate::ast::{Associativity, BinaryOp, Block, BlockItem, Declaration, Expression, FunctionDefinition, Program, Statement, UnaryOp};
 use crate::token::{Token, TokenStream, TokenType, TokenValue};
 use anyhow::{Result, anyhow};
 
@@ -38,17 +35,16 @@ impl Parser {
         self.expect(stream, TokenType::LeftParen)?;
         self.expect(stream, TokenType::Void)?;
         self.expect(stream, TokenType::RightParen)?;
-        self.expect(stream, TokenType::LeftBrace)?;
 
-        let body = self.body(stream)?;
-
-        self.expect(stream, TokenType::RightBrace)?;
+        let body = self.block(stream)?;
 
         Ok(FunctionDefinition::new(name, body))
     }
 
-    fn body(&self, stream: &mut TokenStream) -> Result<Vec<BlockItem>> {
+    fn block(&self, stream: &mut TokenStream) -> Result<Block> {
         let mut items = Vec::new();
+
+        self.expect(stream, TokenType::LeftBrace)?;
 
         while let Some(token) = stream.peek() {
             match token.token_type {
@@ -62,7 +58,9 @@ impl Parser {
             }
         }
 
-        Ok(items)
+        self.expect(stream, TokenType::RightBrace)?;
+
+        Ok(Block::new(items))
     }
 
     fn declaration(&self, stream: &mut TokenStream) -> Result<Declaration> {
@@ -100,6 +98,7 @@ impl Parser {
             Some(token) => match token.token_type {
                 TokenType::Return => self.return_statement(stream),
                 TokenType::Semicolon => self.null_statement(stream),
+                TokenType::LeftBrace => self.compound_statement(stream),
                 TokenType::If => self.if_statement(stream),
                 TokenType::Goto => self.goto_statement(stream),
                 _ => self.expression_statement(stream),
@@ -130,6 +129,10 @@ impl Parser {
         let target = target_token.lexeme;
         self.expect(stream, TokenType::Semicolon)?;
         Ok(Statement::GotoStatement(target))
+    }
+    
+    fn compound_statement(&self, stream: &mut TokenStream) -> Result<Statement> {
+        self.block(stream).map(Statement::CompoundStatement)
     }
 
     fn if_statement(&self, stream: &mut TokenStream) -> Result<Statement> {

@@ -1,6 +1,4 @@
-use crate::ast::{
-    BinaryOp, BlockItem, Declaration, Expression, FunctionDefinition, Statement, UnaryOp,
-};
+use crate::ast::{BinaryOp, Block, BlockItem, Declaration, Expression, FunctionDefinition, Statement, UnaryOp};
 use crate::semantic::NameGeneratorRef;
 use crate::tacky::Instruction::Unary;
 use crate::tacky::Value::IntegerConstant;
@@ -115,9 +113,9 @@ impl TackyEmitter {
         })
     }
 
-    fn emit_block(&mut self, items: &Vec<BlockItem>) -> Vec<Instruction> {
+    fn emit_block(&mut self, block: &Block) -> Vec<Instruction> {
         let mut instructions = vec![];
-        for item in items {
+        for item in &block.items {
             match item {
                 BlockItem::Declaration(decl) => {
                     instructions.extend(self.emit_declaration(decl));
@@ -159,6 +157,7 @@ impl TackyEmitter {
                 instructions
             }
             Statement::Null => vec![],
+            Statement::CompoundStatement(block) => self.emit_block(block),
             Statement::IfStatement {
                 condition,
                 then_branch,

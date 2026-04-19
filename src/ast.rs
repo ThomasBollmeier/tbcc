@@ -21,11 +21,11 @@ impl Program {
 #[derive(Debug, Clone)]
 pub struct FunctionDefinition {
     pub name: String,
-    pub body: Vec<BlockItem>,
+    pub body: Block,
 }
 
 impl FunctionDefinition {
-    pub fn new(name: String, body: Vec<BlockItem>) -> Self {
+    pub fn new(name: String, body: Block) -> Self {
         FunctionDefinition { name, body }
     }
 
@@ -35,6 +35,25 @@ impl FunctionDefinition {
 
     pub fn accept_mut<R>(&mut self, visitor: &mut impl VisitorMut<R>) -> R {
         visitor.visit_function_definition(self)
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct Block {
+    pub items: Vec<BlockItem>,
+}
+
+impl Block {
+
+    pub fn new(items: Vec<BlockItem>) -> Self {
+        Block { items }
+    }
+    pub fn accept<R>(&self, visitor: &mut impl Visitor<R>) -> R {
+        visitor.visit_block(self)
+    }
+
+    pub fn accept_mut<R>(&mut self, visitor: &mut impl VisitorMut<R>) -> R {
+        visitor.visit_block(self)
     }
 }
 
@@ -85,6 +104,7 @@ pub enum Statement {
     Return(Expression),
     Expression(Expression),
     Null,
+    CompoundStatement(Block),
     IfStatement {
         condition: Expression,
         then_branch: Box<Statement>,
@@ -197,6 +217,7 @@ impl From<&BinaryOp> for Associativity {
 pub trait Visitor<A> {
     fn visit_program(&mut self, program: &Program) -> A;
     fn visit_function_definition(&mut self, func_def: &FunctionDefinition) -> A;
+    fn visit_block(&mut self, block: &Block) -> A;
     fn visit_declaration(&mut self, decl: &Declaration) -> A;
     fn visit_statement(&mut self, stmt: &Statement) -> A;
     fn visit_expression(&mut self, expr: &Expression) -> A;
@@ -205,6 +226,7 @@ pub trait Visitor<A> {
 pub trait VisitorMut<A> {
     fn visit_program(&mut self, program: &mut Program) -> A;
     fn visit_function_definition(&mut self, func_def: &mut FunctionDefinition) -> A;
+    fn visit_block(&mut self, block: &mut Block) -> A;
     fn visit_declaration(&mut self, decl: &mut Declaration) -> A;
     fn visit_statement(&mut self, stmt: &mut Statement) -> A;
     fn visit_expression(&mut self, expr: &mut Expression) -> A;
