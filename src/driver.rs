@@ -3,12 +3,11 @@ use crate::cli::Options;
 use crate::codegen::CodeGenerator;
 use crate::lexer::Lexer;
 use crate::parser::Parser;
+use crate::semantic;
+use crate::tacky::TackyEmitter;
 use anyhow::{Result, anyhow};
 use std::path::Path;
 use std::process::Command;
-use crate::semantic;
-use crate::semantic::{LabelResolver, VariableResolver};
-use crate::tacky::TackyEmitter;
 
 pub fn compile(options: &Options) -> Result<()> {
     let preprocessed_file = create_preprocessed_file(&options.source)?;
@@ -31,19 +30,15 @@ pub fn compile(options: &Options) -> Result<()> {
     }
 
     let var_name_generator = semantic::make_var_name_generator();
-    let mut variable_resolver = VariableResolver::new(var_name_generator.clone());
-    variable_resolver.resolve(&mut program)?;
-
     let label_name_generator = semantic::make_label_name_generator();
-    let mut label_resolver = LabelResolver::new(label_name_generator.clone());
-    label_resolver.resolve(&mut program)?;
+
+    semantic::validate(&var_name_generator, &label_name_generator, &mut program)?;
 
     if options.validate {
         return Ok(());
     }
 
     let tmp_var_name_generator = semantic::make_temp_var_name_generator();
-
     let mut tacky_emitter = TackyEmitter::new(label_name_generator, tmp_var_name_generator);
     let tacky_program = tacky_emitter.emit_program(&program)?;
 

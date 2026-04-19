@@ -66,6 +66,72 @@ impl LabelResolver {
         }
         Ok(())
     }
+
+    fn visit_labeled_statement(
+        &mut self,
+        label: &mut String,
+        statement: &mut Box<Statement>,
+    ) -> Result<()> {
+        match self.check_for_unique_name(label)? {
+            Some(unique_name) => {
+                let current_scope = self.current_scope.as_mut().unwrap();
+                current_scope
+                    .borrow_mut()
+                    .get_current_info_mut(label)
+                    .and_modify(|entry| {
+                        entry.additional.is_declared = true;
+                    });
+                *label = unique_name.clone();
+            }
+            None => {
+                let unique_name = self
+                    .label_name_generator
+                    .borrow_mut()
+                    .make_unique_name(label);
+                let current_scope = self.current_scope.as_mut().unwrap();
+                let mut current_scope = current_scope.borrow_mut();
+                let entry = current_scope.get_current_info_mut(label);
+                entry.or_insert(NamingData {
+                    unique_name: unique_name.clone(),
+                    additional: LabelAdditionalData { is_declared: true },
+                });
+                *label = unique_name;
+            }
+        }
+        statement.accept_mut(self)
+    }
+
+    fn visit_goto_statement(&mut self, label: &mut String) -> Result<()> {
+        if let Some(unique_name) = self.get_existing_unique_name(label)? {
+            *label = unique_name;
+        } else {
+            let unique_name = self
+                .label_name_generator
+                .borrow_mut()
+                .make_unique_name(label);
+            let current_scope = self.current_scope.as_mut().unwrap();
+            let mut current_scope = current_scope.borrow_mut();
+            let entry = current_scope.get_current_info_mut(label);
+            entry.or_insert(NamingData {
+                unique_name: unique_name.clone(),
+                additional: LabelAdditionalData { is_declared: false },
+            });
+            *label = unique_name;
+        }
+        Ok(())
+    }
+
+    fn visit_if_statement(
+        &mut self,
+        then_branch: &mut Box<Statement>,
+        else_branch: &mut Option<Box<Statement>>,
+    ) -> Result<()> {
+        then_branch.accept_mut(self)?;
+        if let Some(else_branch) = else_branch {
+            else_branch.accept_mut(self)?;
+        }
+        Ok(())
+    }
 }
 
 impl VisitorMut<Result<()>> for LabelResolver {
@@ -91,61 +157,17 @@ impl VisitorMut<Result<()>> for LabelResolver {
     fn visit_statement(&mut self, stmt: &mut Statement) -> Result<()> {
         match stmt {
             Statement::LabeledStatement { label, statement } => {
-                match self.check_for_unique_name(label)? {
-                    Some(unique_name) => {
-                        let current_scope = self.current_scope.as_mut().unwrap();
-                        current_scope
-                            .borrow_mut()
-                            .get_current_info_mut(label)
-                            .and_modify(|entry| {
-                                entry.additional.is_declared = true;
-                            });
-                        *label = unique_name.clone();
-                    }
-                    None => {
-                        let unique_name = self
-                            .label_name_generator
-                            .borrow_mut()
-                            .make_unique_name(label);
-                        let current_scope = self.current_scope.as_mut().unwrap();
-                        let mut current_scope = current_scope.borrow_mut();
-                        let entry = current_scope.get_current_info_mut(label);
-                        entry.or_insert(NamingData {
-                            unique_name: unique_name.clone(),
-                            additional: LabelAdditionalData { is_declared: true },
-                        });
-                        *label = unique_name;
-                    }
-                }
-                statement.accept_mut(self)?
+                self.visit_labeled_statement(label, statement)?
             }
             Statement::GotoStatement(label) => {
-                if let Some(unique_name) = self.get_existing_unique_name(label)? {
-                    *label = unique_name;
-                } else {
-                    let unique_name = self
-                        .label_name_generator
-                        .borrow_mut()
-                        .make_unique_name(label);
-                    let current_scope = self.current_scope.as_mut().unwrap();
-                    let mut current_scope = current_scope.borrow_mut();
-                    let entry = current_scope.get_current_info_mut(label);
-                    entry.or_insert(NamingData {
-                        unique_name: unique_name.clone(),
-                        additional: LabelAdditionalData { is_declared: false },
-                    });
-                    *label = unique_name;
-                }
+                self.visit_goto_statement(label)?
             }
             Statement::IfStatement {
                 condition: _,
                 then_branch,
                 else_branch,
             } => {
-                then_branch.accept_mut(self)?;
-                if let Some(else_branch) = else_branch {
-                    else_branch.accept_mut(self)?;
-                }
+                self.visit_if_statement(then_branch, else_branch)?;
             }
             _ => {}
         };
