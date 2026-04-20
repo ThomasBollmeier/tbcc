@@ -44,7 +44,6 @@ pub struct Block {
 }
 
 impl Block {
-
     pub fn new(items: Vec<BlockItem>) -> Self {
         Block { items }
     }
@@ -104,6 +103,26 @@ pub enum Statement {
     Return(Expression),
     Expression(Expression),
     Null,
+    Break {
+        label: String,
+    },
+    Continue {
+        label: String,
+    },
+    While {
+        condition: Expression,
+        body: Box<Statement>,
+    },
+    DoWhile {
+        condition: Expression,
+        body: Box<Statement>,
+    },
+    For {
+        init: ForInit,
+        condition: Option<Expression>,
+        post: Option<Expression>,
+        body: Box<Statement>,
+    },
     CompoundStatement(Block),
     IfStatement {
         condition: Expression,
@@ -114,7 +133,7 @@ pub enum Statement {
     LabeledStatement {
         label: String,
         statement: Box<Statement>,
-    }
+    },
 }
 
 impl Statement {
@@ -125,6 +144,12 @@ impl Statement {
     pub fn accept_mut<R>(&mut self, visitor: &mut impl VisitorMut<R>) -> R {
         visitor.visit_statement(self)
     }
+}
+
+#[derive(Debug, Clone)]
+pub enum ForInit {
+    InitDeclaration(Declaration),
+    InitExpression(Option<Expression>),
 }
 
 #[derive(Debug, Clone)]
@@ -142,7 +167,7 @@ pub enum Expression {
         condition: Box<Expression>,
         then_expr: Box<Expression>,
         else_expr: Box<Expression>,
-    }
+    },
 }
 
 impl Expression {

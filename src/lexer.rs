@@ -1,7 +1,7 @@
-use std::collections::HashMap;
 use crate::token::{Token, TokenType, TokenValue};
 use anyhow::Result;
 use fancy_regex::Regex;
+use std::collections::HashMap;
 
 pub type ValueFn = fn(lexeme: &str) -> TokenValue;
 
@@ -28,13 +28,6 @@ impl Lexer {
         lexer.add_token_type_full(TokenType::Whitespace, r"\s+", true, None);
 
         lexer.add_token_type_full(
-            TokenType::Identifier,
-            r"[a-zA-Z_][a-zA-Z0-9_]*\b",
-            false,
-            None,
-        );
-
-        lexer.add_token_type_full(
             TokenType::IntegerConstant,
             r"\d+\b",
             false,
@@ -44,6 +37,7 @@ impl Lexer {
             }),
         );
 
+        lexer.add_token_type(TokenType::Identifier, r"[a-zA-Z_][a-zA-Z0-9_]*\b");
         lexer.add_token_type(TokenType::LeftParen, r"\(");
         lexer.add_token_type(TokenType::RightParen, r"\)");
         lexer.add_token_type(TokenType::LeftBrace, r"\{");
@@ -90,10 +84,19 @@ impl Lexer {
 
         lexer.keywords.insert("int".to_string(), TokenType::Int);
         lexer.keywords.insert("void".to_string(), TokenType::Void);
-        lexer.keywords.insert("return".to_string(), TokenType::Return);
+        lexer
+            .keywords
+            .insert("return".to_string(), TokenType::Return);
         lexer.keywords.insert("if".to_string(), TokenType::If);
         lexer.keywords.insert("else".to_string(), TokenType::Else);
         lexer.keywords.insert("goto".to_string(), TokenType::Goto);
+        lexer.keywords.insert("do".to_string(), TokenType::Do);
+        lexer.keywords.insert("while".to_string(), TokenType::While);
+        lexer.keywords.insert("for".to_string(), TokenType::For);
+        lexer.keywords.insert("break".to_string(), TokenType::Break);
+        lexer
+            .keywords
+            .insert("continue".to_string(), TokenType::Continue);
 
         lexer
     }
@@ -116,7 +119,10 @@ impl Lexer {
 
                     if !skip {
                         let token_type = if token_type == TokenType::Identifier {
-                            self.keywords.get(&lexeme).cloned().unwrap_or(TokenType::Identifier)
+                            self.keywords
+                                .get(&lexeme)
+                                .cloned()
+                                .unwrap_or(TokenType::Identifier)
                         } else {
                             token_type
                         };
@@ -425,7 +431,8 @@ int main(void) {
     #[test]
     fn scan_compound_assignments() {
         let lexer = Lexer::new();
-        let code = "a += b; c -= d; e *= f; g /= h; i %= j; k &= l; m |= n; o ^= p; q <<= r; s >>= t;";
+        let code =
+            "a += b; c -= d; e *= f; g /= h; i %= j; k &= l; m |= n; o ^= p; q <<= r; s >>= t;";
 
         let tokens = lexer.scan_tokens(code).unwrap();
 
@@ -507,7 +514,6 @@ int main(void) {
         assert_eq!(tokens[6].token_type, TokenType::IntegerConstant);
         assert_eq!(tokens[6].value, Some(TokenValue::Integer(42)));
         assert_eq!(tokens[6].lexeme, "42");
-        assert_eq!(tokens[7].token_type, TokenType::Semicolon); 
+        assert_eq!(tokens[7].token_type, TokenType::Semicolon);
     }
-
 }

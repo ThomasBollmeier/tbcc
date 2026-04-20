@@ -171,6 +171,7 @@ impl TackyEmitter {
                 instructions.extend(self.emit_statement(statement));
                 instructions
             }
+            _ => todo!("Unsupported statement type {:?}", stmt),
         }
     }
 

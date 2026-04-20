@@ -1,5 +1,8 @@
-use crate::ast::Statement::{IfStatement, Return};
-use crate::ast::{Associativity, BinaryOp, Block, BlockItem, Declaration, Expression, FunctionDefinition, Program, Statement, UnaryOp};
+use crate::ast::Statement::{For, IfStatement, Return};
+use crate::ast::{
+    Associativity, BinaryOp, Block, BlockItem, Declaration, Expression, ForInit,
+    FunctionDefinition, Program, Statement, UnaryOp,
+};
 use crate::token::{Token, TokenStream, TokenType, TokenValue};
 use anyhow::{Result, anyhow};
 
@@ -97,9 +100,14 @@ impl Parser {
         match next_token {
             Some(token) => match token.token_type {
                 TokenType::Return => self.return_statement(stream),
+                TokenType::Break => self.break_statement(stream),
+                TokenType::Continue => self.continue_statement(stream),
                 TokenType::Semicolon => self.null_statement(stream),
                 TokenType::LeftBrace => self.compound_statement(stream),
                 TokenType::If => self.if_statement(stream),
+                TokenType::While => self.while_statement(stream),
+                TokenType::Do => self.do_while_statement(stream),
+                TokenType::For => self.for_statement(stream),
                 TokenType::Goto => self.goto_statement(stream),
                 _ => self.expression_statement(stream),
             },
@@ -130,7 +138,7 @@ impl Parser {
         self.expect(stream, TokenType::Semicolon)?;
         Ok(Statement::GotoStatement(target))
     }
-    
+
     fn compound_statement(&self, stream: &mut TokenStream) -> Result<Statement> {
         self.block(stream).map(Statement::CompoundStatement)
     }
@@ -162,6 +170,99 @@ impl Parser {
         })
     }
 
+    fn while_statement(&self, stream: &mut TokenStream) -> Result<Statement> {
+        self.expect(stream, TokenType::While)?;
+        self.expect(stream, TokenType::LeftParen)?;
+        let condition = self.expression(stream, 0)?;
+        self.expect(stream, TokenType::RightParen)?;
+        let body = self.statement(stream)?;
+
+        Ok(Statement::While {
+            condition,
+            body: Box::new(body),
+        })
+    }
+
+    fn do_while_statement(&self, stream: &mut TokenStream) -> Result<Statement> {
+        self.expect(stream, TokenType::Do)?;
+        let body = self.statement(stream)?;
+        self.expect(stream, TokenType::While)?;
+        self.expect(stream, TokenType::LeftParen)?;
+        let condition = self.expression(stream, 0)?;
+        self.expect(stream, TokenType::RightParen)?;
+        self.expect(stream, TokenType::Semicolon)?;
+
+        Ok(Statement::DoWhile {
+            condition,
+            body: Box::new(body),
+        })
+    }
+
+    fn for_statement(&self, stream: &mut TokenStream) -> Result<Statement> {
+        self.expect(stream, TokenType::For)?;
+        self.expect(stream, TokenType::LeftParen)?;
+
+        let init = self.for_init(stream)?;
+        let condition = self.for_condition(stream)?;
+        let post = self.for_post(stream)?;
+        let body = Box::new(self.statement(stream)?);
+
+        Ok(For {
+            init,
+            condition,
+            post,
+            body,
+        })
+    }
+
+    fn for_post(&self, stream: &mut TokenStream) -> Result<Option<Expression>> {
+        self.get_optional_expression(stream, TokenType::RightParen)
+    }
+
+    fn for_condition(&self, stream: &mut TokenStream) -> Result<Option<Expression>> {
+        self.get_optional_expression(stream, TokenType::Semicolon)
+    }
+
+    fn get_optional_expression(
+        &self,
+        stream: &mut TokenStream,
+        terminator_type: TokenType,
+    ) -> Result<Option<Expression>> {
+        let token = stream
+            .peek()
+            .ok_or_else(|| anyhow!("Unexpected end of input in for-loop initializer"))?;
+
+        Ok(if token.token_type == terminator_type {
+            stream.advance();
+            None
+        } else {
+            let expr = self.expression(stream, 0)?;
+            self.expect(stream, terminator_type)?;
+            Some(expr)
+        })
+    }
+
+    fn for_init(&self, stream: &mut TokenStream) -> Result<ForInit> {
+        let token = stream
+            .peek()
+            .ok_or_else(|| anyhow!("Unexpected end of input in for-loop initializer"))?;
+
+        let for_init = match token.token_type {
+            TokenType::Int => ForInit::InitDeclaration(self.declaration(stream)?),
+            TokenType::Semicolon => {
+                self.expect(stream, TokenType::Semicolon)?;
+                ForInit::InitExpression(None)
+            },
+            _ => {
+                let expr = self.expression(stream, 0)?;
+                self.expect(stream, TokenType::Semicolon)?;
+                ForInit::InitExpression(Some(expr))
+            }
+        };
+
+        Ok(for_init)
+    }
+
     fn expression_statement(&self, stream: &mut TokenStream) -> Result<Statement> {
         let expr = self.expression(stream, 0)?;
         self.expect(stream, TokenType::Semicolon)?;
@@ -178,6 +279,22 @@ impl Parser {
         let expr = self.expression(stream, 0)?;
         self.expect(stream, TokenType::Semicolon)?;
         Ok(Return(expr))
+    }
+
+    fn break_statement(&self, stream: &mut TokenStream) -> Result<Statement> {
+        self.expect(stream, TokenType::Break)?;
+        self.expect(stream, TokenType::Semicolon)?;
+        Ok(Statement::Break {
+            label: String::new(),
+        })
+    }
+
+    fn continue_statement(&self, stream: &mut TokenStream) -> Result<Statement> {
+        self.expect(stream, TokenType::Continue)?;
+        self.expect(stream, TokenType::Semicolon)?;
+        Ok(Statement::Continue {
+            label: String::new(),
+        })
     }
 
     fn expression(&self, stream: &mut TokenStream, min_precedence: i32) -> Result<Expression> {
@@ -586,6 +703,20 @@ mod tests {
             return 666;
         everything:
             return 42;
+        }
+        "#;
+        parse_code(code, true);
+    }
+
+    #[test]
+    fn parse_for_loop() {
+        let code = r#"
+        int main(void)
+        {
+            for (i = 0; i < 1; i = i + 1)
+            {
+                return 0;
+            }
         }
         "#;
         parse_code(code, true);

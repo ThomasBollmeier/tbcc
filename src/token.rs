@@ -52,6 +52,11 @@ pub enum TokenType {
     QuestionMark,
     Colon,
     Goto,
+    Do,
+    While,
+    For,
+    Break,
+    Continue,
 }
 
 #[derive(Debug, Clone, PartialEq)]
