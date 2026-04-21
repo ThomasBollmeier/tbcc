@@ -104,20 +104,23 @@ pub enum Statement {
     Expression(Expression),
     Null,
     Break {
-        label: String,
+        loop_id: String,
     },
     Continue {
-        label: String,
+        loop_id: String,
     },
     While {
+        loop_id: String,
         condition: Expression,
         body: Box<Statement>,
     },
     DoWhile {
+        loop_id: String,
         condition: Expression,
         body: Box<Statement>,
     },
     For {
+        loop_id: String,
         init: ForInit,
         condition: Option<Expression>,
         post: Option<Expression>,

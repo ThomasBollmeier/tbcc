@@ -178,6 +178,7 @@ impl Parser {
         let body = self.statement(stream)?;
 
         Ok(Statement::While {
+            loop_id: String::new(),
             condition,
             body: Box::new(body),
         })
@@ -193,6 +194,7 @@ impl Parser {
         self.expect(stream, TokenType::Semicolon)?;
 
         Ok(Statement::DoWhile {
+            loop_id: String::new(),
             condition,
             body: Box::new(body),
         })
@@ -208,6 +210,7 @@ impl Parser {
         let body = Box::new(self.statement(stream)?);
 
         Ok(For {
+            loop_id: String::new(),
             init,
             condition,
             post,
@@ -285,7 +288,7 @@ impl Parser {
         self.expect(stream, TokenType::Break)?;
         self.expect(stream, TokenType::Semicolon)?;
         Ok(Statement::Break {
-            label: String::new(),
+            loop_id: String::new(),
         })
     }
 
@@ -293,7 +296,7 @@ impl Parser {
         self.expect(stream, TokenType::Continue)?;
         self.expect(stream, TokenType::Semicolon)?;
         Ok(Statement::Continue {
-            label: String::new(),
+            loop_id: String::new(),
         })
     }
 

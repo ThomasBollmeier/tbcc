@@ -1,6 +1,8 @@
-use crate::ast::{Block, Declaration, Expression, FunctionDefinition, Program, Statement, VisitorMut};
+use crate::ast::{Block, Declaration, Expression, Program, Statement};
 use crate::semantic::name_generator::NameGeneratorRef;
 use crate::semantic::scope::{Scope, ScopeRef};
+use crate::semantic::walker;
+use crate::semantic::walker::WalkerMut;
 use anyhow::{Result, anyhow};
 
 pub struct VariableResolver {
@@ -17,7 +19,7 @@ impl VariableResolver {
     }
 
     pub fn resolve(&mut self, program: &mut Program) -> Result<()> {
-        program.accept_mut(self)
+        walker::walk(program, self)
     }
 
     fn open_scope(&mut self) {
@@ -33,69 +35,27 @@ impl VariableResolver {
     }
 }
 
-impl VisitorMut<Result<()>> for VariableResolver {
-    fn visit_program(&mut self, program: &mut Program) -> Result<()> {
-        program.function_definition.accept_mut(self)
-    }
-
-    fn visit_function_definition(&mut self, func_def: &mut FunctionDefinition) -> Result<()> {
-        func_def.body.accept_mut(self)?;
-
+impl WalkerMut for VariableResolver {
+    fn enter_block(&mut self, _: &mut Block) -> Result<()> {
+        self.open_scope();
         Ok(())
     }
 
-    fn visit_block(&mut self, block: &mut Block) -> Result<()> {
-        self.open_scope();
-
-        for item in &mut block.items {
-            match item {
-                crate::ast::BlockItem::Declaration(decl) => decl.accept_mut(self)?,
-                crate::ast::BlockItem::Statement(stmt) => stmt.accept_mut(self)?,
-            }
-        }
-
+    fn leave_block(&mut self, _: &mut Block) -> Result<()> {
         self.close_scope();
         Ok(())
     }
 
-    fn visit_declaration(&mut self, decl: &mut Declaration) -> Result<()> {
+    fn enter_declaration(&mut self, decl: &mut Declaration) -> Result<()> {
         let unique_name = self.current_scope.borrow_mut().add(&decl.name)?;
         decl.name = unique_name;
-
-        if let Some(init_expr) = &mut decl.init_expr {
-            init_expr.accept_mut(self)?;
-        }
-
         Ok(())
     }
 
-    fn visit_statement(&mut self, stmt: &mut Statement) -> Result<()> {
+    fn enter_statement(&mut self, stmt: &mut Statement) -> Result<()> {
         match stmt {
-            Statement::Expression(expr) => {
-                expr.accept_mut(self)?;
-            }
-            Statement::Return(expr) => {
-                expr.accept_mut(self)?;
-            }
-            Statement::CompoundStatement(block) => {
-                block.accept_mut(self)?;
-            }
-            Statement::IfStatement {
-                condition,
-                then_branch,
-                else_branch,
-            } => {
-                condition.accept_mut(self)?;
-                then_branch.accept_mut(self)?;
-                if let Some(else_branch) = else_branch {
-                    else_branch.accept_mut(self)?;
-                }
-            }
-            Statement::LabeledStatement {
-                label: _,
-                statement,
-            } => {
-                statement.accept_mut(self)?;
+            Statement::For { .. } => {
+                self.open_scope();
             }
             _ => {}
         }
@@ -103,43 +63,34 @@ impl VisitorMut<Result<()>> for VariableResolver {
         Ok(())
     }
 
-    fn visit_expression(&mut self, expr: &mut Expression) -> Result<()> {
+    fn leave_statement(&mut self, stmt: &mut Statement) -> Result<()> {
+        match stmt {
+            Statement::For { .. } => {
+                self.close_scope();
+            }
+            _ => {}
+        }
+
+        Ok(())
+    }
+
+    fn enter_expression(&mut self, expr: &mut Expression) -> Result<()> {
         use Expression::*;
         match expr {
             Assignment {
                 left,
-                right,
+                right: _,
                 is_postfix: _,
-            } => {
-                match **left {
-                    Var(_) => {}
-                    _ => return Err(anyhow!("Left-hand side of assignment must be a variable")),
-                }
-                left.accept_mut(self)?;
-                right.accept_mut(self)?;
-            }
+            } => match **left {
+                Var(_) => {}
+                _ => return Err(anyhow!("Left-hand side of assignment must be a variable")),
+            },
             Var(name) => {
                 if let Some(unique_name) = self.current_scope.borrow().get_unique_name(name) {
                     *name = unique_name;
                 } else {
                     return Err(anyhow!("Variable `{name}` is not defined"));
                 }
-            }
-            UnaryExpr(_, expr) => {
-                expr.accept_mut(self)?;
-            }
-            BinaryExpr(_, left, right) => {
-                left.accept_mut(self)?;
-                right.accept_mut(self)?;
-            }
-            ConditionalExpr {
-                condition,
-                then_expr,
-                else_expr,
-            } => {
-                condition.accept_mut(self)?;
-                then_expr.accept_mut(self)?;
-                else_expr.accept_mut(self)?;
             }
             _ => {}
         }
@@ -292,7 +243,7 @@ mod tests {
         let tokens = lexer.scan_tokens(code)?;
         let mut program = parser.parse(tokens)?;
 
-        let var_name_generator = make_var_name_generator(); 
+        let var_name_generator = make_var_name_generator();
         let mut resolver = VariableResolver::new(var_name_generator);
         resolver.resolve(&mut program)?;
 
