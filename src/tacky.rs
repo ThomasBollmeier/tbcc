@@ -1,4 +1,7 @@
-use crate::ast::{BinaryOp, Block, BlockItem, Declaration, Expression, FunctionDefinition, Statement, UnaryOp};
+use crate::ast::{
+    BinaryOp, Block, BlockItem, Declaration, Expression, ForInit, FunctionDefinition, Statement,
+    UnaryOp,
+};
 use crate::semantic::NameGeneratorRef;
 use crate::tacky::Instruction::Unary;
 use crate::tacky::Value::IntegerConstant;
@@ -89,8 +92,14 @@ pub struct TackyEmitter {
 }
 
 impl TackyEmitter {
-    pub fn new(label_name_generator: NameGeneratorRef, tmp_var_name_generator: NameGeneratorRef) -> TackyEmitter {
-        TackyEmitter { label_name_generator, tmp_var_name_generator }
+    pub fn new(
+        label_name_generator: NameGeneratorRef,
+        tmp_var_name_generator: NameGeneratorRef,
+    ) -> TackyEmitter {
+        TackyEmitter {
+            label_name_generator,
+            tmp_var_name_generator,
+        }
     }
 
     pub fn emit_program(&mut self, program: &crate::ast::Program) -> Result<Program> {
@@ -145,34 +154,189 @@ impl TackyEmitter {
 
     fn emit_statement(&mut self, stmt: &Statement) -> Vec<Instruction> {
         match stmt {
-            Statement::Return(expr) => {
-                let mut instructions = vec![];
-                let value = self.emit_expression(expr, &mut instructions);
-                instructions.push(Instruction::Return(value));
-                instructions
-            }
-            Statement::Expression(expr) => {
-                let mut instructions = vec![];
-                self.emit_expression(expr, &mut instructions);
-                instructions
-            }
-            Statement::Null => vec![],
+            Statement::Return(expr) => self.emit_return_statement(expr),
+            Statement::Expression(expr) => self.emit_expression_statement(expr),
+            Statement::Null => self.emit_null_statement(),
             Statement::CompoundStatement(block) => self.emit_block(block),
             Statement::IfStatement {
                 condition,
                 then_branch,
                 else_branch,
             } => self.emit_if_statement(condition, then_branch, else_branch),
-            Statement::GotoStatement(label) => vec![Instruction::Jump {
-                target: label.clone(),
-            }],
+            Statement::GotoStatement(label) => self.emit_goto_statement(label),
             Statement::LabeledStatement { label, statement } => {
-                let mut instructions = vec![Instruction::Label(label.clone())];
-                instructions.extend(self.emit_statement(statement));
-                instructions
+                self.emit_labeled_statement(label, statement)
             }
-            _ => todo!("Unsupported statement type {:?}", stmt),
+            Statement::Break { loop_id } => self.emit_break_statement(loop_id),
+            Statement::Continue { loop_id } => self.emit_continue_statement(loop_id),
+            Statement::DoWhile {
+                loop_id,
+                body,
+                condition,
+            } => self.emit_do_while_statement(loop_id, body, condition),
+            Statement::While {
+                loop_id,
+                condition,
+                body,
+            } => self.emit_while_statement(loop_id, condition, body),
+            Statement::For {
+                loop_id,
+                init,
+                condition,
+                post,
+                body,
+            } => self.emit_for_statement(loop_id, init, condition, post, body),
         }
+    }
+
+    fn emit_for_statement(
+        &mut self,
+        loop_id: &str,
+        init: &ForInit,
+        condition: &Option<Expression>,
+        post: &Option<Expression>,
+        body: &Box<Statement>,
+    ) -> Vec<Instruction> {
+        let mut instructions = vec![];
+
+        let start_label = self.make_start_label(loop_id);
+        let break_label = self.make_break_label(loop_id);
+        let continue_label = self.make_continue_label(loop_id);
+
+        instructions.extend(self.emit_for_init(init));
+
+        instructions.push(Instruction::Label(start_label.clone()));
+
+        if let Some(condition) = condition {
+            let condition_value = self.emit_expression(condition, &mut instructions);
+            instructions.push(Instruction::JumpIfZero {
+                condition: condition_value,
+                target: break_label.clone(),
+            });
+        }
+
+        instructions.extend(self.emit_statement(body));
+
+        instructions.push(Instruction::Label(continue_label));
+        if let Some(post) = post {
+            self.emit_expression(post, &mut instructions);
+        }
+        instructions.push(Instruction::Jump {
+            target: start_label,
+        });
+        instructions.push(Instruction::Label(break_label));
+
+        instructions
+    }
+
+    fn emit_for_init(&mut self, init: &ForInit) -> Vec<Instruction> {
+        let mut instructions = vec![];
+
+        match init {
+            ForInit::InitDeclaration(decl) => {
+                instructions.extend(self.emit_declaration(decl));
+            }
+            ForInit::InitExpression(expr) => {
+                if let Some(expr) = expr {
+                    self.emit_expression(expr, &mut instructions);
+                }
+            }
+        }
+
+        instructions
+    }
+
+    fn emit_while_statement(
+        &mut self,
+        loop_id: &str,
+        condition: &Expression,
+        body: &Statement,
+    ) -> Vec<Instruction> {
+        let mut instructions = vec![];
+
+        let break_label = self.make_break_label(loop_id);
+        let continue_label = self.make_continue_label(loop_id);
+
+        instructions.push(Instruction::Label(continue_label.clone()));
+        let condition_value = self.emit_expression(condition, &mut instructions);
+        instructions.push(Instruction::JumpIfZero {
+            condition: condition_value,
+            target: break_label.clone(),
+        });
+        instructions.extend(self.emit_statement(body));
+        instructions.push(Instruction::Jump {
+            target: continue_label.clone(),
+        });
+        instructions.push(Instruction::Label(break_label));
+
+        instructions
+    }
+
+    fn emit_do_while_statement(
+        &mut self,
+        loop_id: &str,
+        body: &Statement,
+        condition: &Expression,
+    ) -> Vec<Instruction> {
+        let mut instructions = vec![];
+
+        let start_label = self.make_start_label(loop_id);
+        instructions.push(Instruction::Label(start_label.clone()));
+        instructions.extend(self.emit_statement(body));
+        instructions.push(Instruction::Label(self.make_continue_label(loop_id)));
+        let condition_value = self.emit_expression(condition, &mut instructions);
+        instructions.push(Instruction::JumpIfNotZero {
+            condition: condition_value,
+            target: start_label,
+        });
+        instructions.push(Instruction::Label(self.make_break_label(loop_id)));
+
+        instructions
+    }
+
+    fn emit_return_statement(&mut self, expr: &Expression) -> Vec<Instruction> {
+        let mut instructions = vec![];
+        let value = self.emit_expression(expr, &mut instructions);
+        instructions.push(Instruction::Return(value));
+        instructions
+    }
+
+    fn emit_expression_statement(&mut self, expr: &Expression) -> Vec<Instruction> {
+        let mut instructions = vec![];
+        self.emit_expression(expr, &mut instructions);
+        instructions
+    }
+
+    fn emit_null_statement(&mut self) -> Vec<Instruction> {
+        vec![]
+    }
+
+    fn emit_goto_statement(&mut self, label: &str) -> Vec<Instruction> {
+        vec![Instruction::Jump {
+            target: label.to_string(),
+        }]
+    }
+
+    fn emit_labeled_statement(
+        &mut self,
+        label: &str,
+        statement: &Box<Statement>,
+    ) -> Vec<Instruction> {
+        let mut instructions = vec![Instruction::Label(label.to_string())];
+        instructions.extend(self.emit_statement(statement));
+        instructions
+    }
+
+    fn emit_break_statement(&mut self, loop_id: &str) -> Vec<Instruction> {
+        vec![Instruction::Jump {
+            target: self.make_break_label(loop_id),
+        }]
+    }
+
+    fn emit_continue_statement(&mut self, loop_id: &str) -> Vec<Instruction> {
+        vec![Instruction::Jump {
+            target: self.make_continue_label(loop_id),
+        }]
     }
 
     fn emit_if_statement(
@@ -404,11 +568,27 @@ impl TackyEmitter {
     }
 
     fn make_temp_var(&mut self) -> String {
-        self.tmp_var_name_generator.borrow_mut().make_unique_name("")
+        self.tmp_var_name_generator
+            .borrow_mut()
+            .make_unique_name("")
     }
 
     fn make_label(&mut self, prefix: &str) -> String {
-        self.label_name_generator.borrow_mut().make_unique_name(prefix)
+        self.label_name_generator
+            .borrow_mut()
+            .make_unique_name(prefix)
+    }
+
+    fn make_start_label(&mut self, loop_id: &str) -> String {
+        format!("start.{loop_id}")
+    }
+
+    fn make_break_label(&mut self, loop_id: &str) -> String {
+        format!("break.{loop_id}")
+    }
+
+    fn make_continue_label(&mut self, loop_id: &str) -> String {
+        format!("continue.{loop_id}")
     }
 }
 
@@ -928,6 +1108,130 @@ mod tests {
             Return(IntegerConstant(2)),
             Label("if_end_1".to_string()),
             Label("if_end_0".to_string()),
+        ];
+
+        let actual = emitter.emit_statement(&stmt);
+        assert_eq!(expected, actual);
+    }
+
+    #[test]
+    fn emit_while_with_break_and_continue() {
+        use Instruction::*;
+        use Value::*;
+
+        let mut emitter = make_emitter();
+        let stmt = Statement::While {
+            loop_id: "loop.0".to_string(),
+            condition: Expression::IntegerConstant(1),
+            body: Box::new(Statement::CompoundStatement(Block::new(vec![
+                BlockItem::Statement(Statement::Break {
+                    loop_id: "loop.0".to_string(),
+                }),
+                BlockItem::Statement(Statement::Continue {
+                    loop_id: "loop.0".to_string(),
+                }),
+            ]))),
+        };
+
+        let expected = vec![
+            Label("continue.loop.0".to_string()),
+            JumpIfZero {
+                condition: IntegerConstant(1),
+                target: "break.loop.0".to_string(),
+            },
+            Jump {
+                target: "break.loop.0".to_string(),
+            },
+            Jump {
+                target: "continue.loop.0".to_string(),
+            },
+            Jump {
+                target: "continue.loop.0".to_string(),
+            },
+            Label("break.loop.0".to_string()),
+        ];
+
+        let actual = emitter.emit_statement(&stmt);
+        assert_eq!(expected, actual);
+    }
+
+    #[test]
+    fn emit_do_while_with_break_and_continue() {
+        use Instruction::*;
+        use Value::*;
+
+        let mut emitter = make_emitter();
+        let stmt = Statement::DoWhile {
+            loop_id: "loop.1".to_string(),
+            condition: Expression::IntegerConstant(1),
+            body: Box::new(Statement::CompoundStatement(Block::new(vec![
+                BlockItem::Statement(Statement::Break {
+                    loop_id: "loop.1".to_string(),
+                }),
+                BlockItem::Statement(Statement::Continue {
+                    loop_id: "loop.1".to_string(),
+                }),
+            ]))),
+        };
+
+        let expected = vec![
+            Label("start.loop.1".to_string()),
+            Jump {
+                target: "break.loop.1".to_string(),
+            },
+            Jump {
+                target: "continue.loop.1".to_string(),
+            },
+            Label("continue.loop.1".to_string()),
+            JumpIfNotZero {
+                condition: IntegerConstant(1),
+                target: "start.loop.1".to_string(),
+            },
+            Label("break.loop.1".to_string()),
+        ];
+
+        let actual = emitter.emit_statement(&stmt);
+        assert_eq!(expected, actual);
+    }
+
+    #[test]
+    fn emit_for_with_break_and_continue() {
+        use Instruction::*;
+        use Value::*;
+
+        let mut emitter = make_emitter();
+        let stmt = Statement::For {
+            loop_id: "loop.2".to_string(),
+            init: ForInit::InitExpression(None),
+            condition: Some(Expression::IntegerConstant(1)),
+            post: None,
+            body: Box::new(Statement::CompoundStatement(Block::new(vec![
+                BlockItem::Statement(Statement::Break {
+                    loop_id: "loop.2".to_string(),
+                }),
+                BlockItem::Statement(Statement::Continue {
+                    loop_id: "loop.2".to_string(),
+                }),
+            ]))),
+        };
+
+        let expected = vec![
+            Label("start.loop.2".to_string()),
+            JumpIfZero {
+                condition: IntegerConstant(1),
+                target: "break.loop.2".to_string(),
+            },
+            Jump {
+                target: "break.loop.2".to_string(),
+            },
+            Jump {
+                target: "continue.loop.2".to_string(),
+            },
+            Label("continue.loop.2".to_string()),
+            Jump {
+                target: "start.loop.2".to_string(),
+            },
+            Label("break.loop.2".to_string()),
         ];
 
         let actual = emitter.emit_statement(&stmt);
