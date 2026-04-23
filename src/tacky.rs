@@ -1,7 +1,4 @@
-use crate::ast::{
-    BinaryOp, Block, BlockItem, Declaration, Expression, ForInit, FunctionDefinition, Statement,
-    UnaryOp,
-};
+use crate::ast::{BinaryOp, Block, BlockItem, Declaration, Expression, ForInit, FunctionDefinition, Label, Statement, UnaryOp};
 use crate::semantic::NameGeneratorRef;
 use crate::tacky::Instruction::Unary;
 use crate::tacky::Value::IntegerConstant;
@@ -186,6 +183,7 @@ impl TackyEmitter {
                 post,
                 body,
             } => self.emit_for_statement(loop_id, init, condition, post, body),
+            _ => todo!("Unsupported statement type: {:?}", stmt),
         }
     }
 
@@ -319,10 +317,11 @@ impl TackyEmitter {
 
     fn emit_labeled_statement(
         &mut self,
-        label: &str,
+        label: &Label,
         statement: &Box<Statement>,
     ) -> Vec<Instruction> {
-        let mut instructions = vec![Instruction::Label(label.to_string())];
+        let name = label.get_name().expect("Expected label to be a label");
+        let mut instructions = vec![Instruction::Label(name)];
         instructions.extend(self.emit_statement(statement));
         instructions
     }

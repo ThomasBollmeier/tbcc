@@ -54,3 +54,9 @@ pub fn make_loop_id_generator() -> NameGeneratorRef {
         format!("loop.{cnt}")
     ))))
 }
+
+pub fn make_switch_id_generator() -> NameGeneratorRef {
+    Rc::new(RefCell::new(NameGenerator::new(Box::new(|_, cnt|
+        format!("switch.{cnt}")
+    ))))
+}

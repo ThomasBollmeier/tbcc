@@ -1,4 +1,4 @@
-use crate::ast::{FunctionDefinition, Program, Statement};
+use crate::ast::{FunctionDefinition, Label, Program, Statement};
 use crate::semantic::name_generator::NameGeneratorRef;
 use crate::semantic::scope::{NamingData, Scope, ScopeRef};
 use crate::semantic::walker;
@@ -69,31 +69,41 @@ impl LabelResolver {
         Ok(())
     }
 
-    fn visit_labeled_statement(&mut self, label: &mut String) -> Result<()> {
-        match self.check_for_unique_name(label)? {
+    fn visit_labeled_statement(&mut self, label: &mut Label) -> Result<()> {
+        let label_name = match label {
+            Label::Label(name) => {
+                if name.is_empty() {
+                    return Err(anyhow!("Label name cannot be empty"));
+                }
+                name
+            }
+            Label::Case{..} | Label::Default{..} => return Ok(()),
+        };
+
+        match self.check_for_unique_name(label_name)? {
             Some(unique_name) => {
                 let current_scope = self.current_scope.as_mut().unwrap();
                 current_scope
                     .borrow_mut()
-                    .get_current_info_mut(label)
+                    .get_current_info_mut(label_name)
                     .and_modify(|entry| {
                         entry.additional.is_declared = true;
                     });
-                *label = unique_name.clone();
+                *label = Label::Label(unique_name);
             }
             None => {
                 let unique_name = self
                     .label_name_generator
                     .borrow_mut()
-                    .make_unique_name(label);
+                    .make_unique_name(label_name);
                 let current_scope = self.current_scope.as_mut().unwrap();
                 let mut current_scope = current_scope.borrow_mut();
-                let entry = current_scope.get_current_info_mut(label);
+                let entry = current_scope.get_current_info_mut(label_name);
                 entry.or_insert(NamingData {
                     unique_name: unique_name.clone(),
                     additional: LabelAdditionalData { is_declared: true },
                 });
-                *label = unique_name;
+                *label = Label::Label(unique_name);
             }
         }
         Ok(())
@@ -134,10 +144,7 @@ impl WalkerMut for LabelResolver {
 
     fn enter_statement(&mut self, stmt: &mut Statement) -> Result<()> {
         match stmt {
-            Statement::LabeledStatement {
-                label,
-                statement: _,
-            } => self.visit_labeled_statement(label)?,
+            Statement::LabeledStatement { label, .. } => self.visit_labeled_statement(label)?,
             Statement::GotoStatement(label) => self.visit_goto_statement(label)?,
             _ => {}
         };
@@ -198,6 +205,8 @@ mod tests {
             }
             _ => panic!("Expected first body item to be an if statement"),
         };
+
+        let resolved_label = resolved_label.get_name().expect("Expected label to be a simple label");
 
         assert_eq!(resolved_label, "label_0");
 

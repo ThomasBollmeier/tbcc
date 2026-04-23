@@ -97,6 +97,9 @@ impl Lexer {
         lexer
             .keywords
             .insert("continue".to_string(), TokenType::Continue);
+        lexer.keywords.insert("switch".to_string(), TokenType::Switch);
+        lexer.keywords.insert("case".to_string(), TokenType::Case);
+        lexer.keywords.insert("default".to_string(), TokenType::Default);
 
         lexer
     }
@@ -515,5 +518,36 @@ int main(void) {
         assert_eq!(tokens[6].value, Some(TokenValue::Integer(42)));
         assert_eq!(tokens[6].lexeme, "42");
         assert_eq!(tokens[7].token_type, TokenType::Semicolon);
+    }
+
+    #[test]
+    fn scan_switch_statement() {
+        let lexer = Lexer::new();
+        let code = "switch (x) { case 1: break; default: return 0; }";
+
+        let tokens = lexer.scan_tokens(code).unwrap();
+
+        assert_eq!(tokens.len(), 16);
+
+        assert_eq!(tokens[0].token_type, TokenType::Switch);
+        assert_eq!(tokens[0].lexeme, "switch");
+        assert_eq!(tokens[1].token_type, TokenType::LeftParen);
+        assert_eq!(tokens[2].token_type, TokenType::Identifier);
+        assert_eq!(tokens[2].lexeme, "x");
+        assert_eq!(tokens[3].token_type, TokenType::RightParen);
+        assert_eq!(tokens[4].token_type, TokenType::LeftBrace);
+        assert_eq!(tokens[5].token_type, TokenType::Case);
+        assert_eq!(tokens[6].token_type, TokenType::IntegerConstant);
+        assert_eq!(tokens[6].value, Some(TokenValue::Integer(1)));
+        assert_eq!(tokens[7].token_type, TokenType::Colon);
+        assert_eq!(tokens[8].token_type, TokenType::Break);
+        assert_eq!(tokens[9].token_type, TokenType::Semicolon);
+        assert_eq!(tokens[10].token_type, TokenType::Default);
+        assert_eq!(tokens[11].token_type, TokenType::Colon);
+        assert_eq!(tokens[12].token_type, TokenType::Return);
+        assert_eq!(tokens[13].token_type, TokenType::IntegerConstant);
+        assert_eq!(tokens[13].value, Some(TokenValue::Integer(0)));
+        assert_eq!(tokens[14].token_type, TokenType::Semicolon);
+        assert_eq!(tokens[15].token_type, TokenType::RightBrace);
     }
 }

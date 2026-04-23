@@ -146,11 +146,16 @@ fn walk_statement(stmt: &mut Statement, walker: &mut impl WalkerMut) -> Result<(
                 walk_statement(else_branch, walker)?;
             }
         }
-        GotoStatement(_) => {}
-        LabeledStatement {
-            label: _,
-            statement,
+        SwitchStatement {
+            condition,
+            body,
+            ..
         } => {
+            walk_expression(condition, walker)?;
+            walk_statement(body, walker)?;
+        }
+        GotoStatement(_) => {}
+        LabeledStatement { statement, .. } => {
             walk_statement(statement, walker)?;
         }
     }

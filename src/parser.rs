@@ -1,7 +1,7 @@
-use crate::ast::Statement::{For, IfStatement, Return};
+use crate::ast::Statement::{For, IfStatement, Return, SwitchStatement};
 use crate::ast::{
     Associativity, BinaryOp, Block, BlockItem, Declaration, Expression, ForInit,
-    FunctionDefinition, Program, Statement, UnaryOp,
+    FunctionDefinition, Label, Program, Statement, UnaryOp,
 };
 use crate::token::{Token, TokenStream, TokenType, TokenValue};
 use anyhow::{Result, anyhow};
@@ -88,11 +88,11 @@ impl Parser {
     }
 
     fn statement(&self, stream: &mut TokenStream) -> Result<Statement> {
-        if let Some(label) = self.get_label(stream) {
-            let stmt = self.statement(stream)?;
+        if let Ok(Some(label)) = self.get_label(stream) {
+            let statement = self.statement(stream)?;
             return Ok(Statement::LabeledStatement {
                 label,
-                statement: Box::new(stmt),
+                statement: Box::new(statement),
             });
         }
 
@@ -105,6 +105,7 @@ impl Parser {
                 TokenType::Semicolon => self.null_statement(stream),
                 TokenType::LeftBrace => self.compound_statement(stream),
                 TokenType::If => self.if_statement(stream),
+                TokenType::Switch => self.switch_statement(stream),
                 TokenType::While => self.while_statement(stream),
                 TokenType::Do => self.do_while_statement(stream),
                 TokenType::For => self.for_statement(stream),
@@ -115,19 +116,43 @@ impl Parser {
         }
     }
 
-    fn get_label(&self, stream: &mut TokenStream) -> Option<String> {
-        let next_tokens = stream.peek_next_n(2);
+    fn get_label(&self, stream: &mut TokenStream) -> Result<Option<Label>> {
+        let next_token = match stream.peek() {
+            Some(token) => token.clone(),
+            None => return Ok(None),
+        };
 
-        if next_tokens.len() == 2
-            && next_tokens[0].token_type == TokenType::Identifier
-            && next_tokens[1].token_type == TokenType::Colon
-        {
-            let label = next_tokens[0].lexeme.clone();
-            stream.advance(); // consume the identifier
-            stream.advance(); // consume the colon
-            Some(label)
-        } else {
-            None
+        match next_token.token_type {
+            TokenType::Identifier => {
+                let next_next_token = match stream.peek_with_offset(1) {
+                    Some(token) => token.clone(),
+                    None => return Ok(None),
+                };
+                if next_next_token.token_type == TokenType::Colon {
+                    stream.advance(); // consume identifier
+                    stream.advance(); // consume colon
+                    Ok(Some(Label::Label(next_token.lexeme)))
+                } else {
+                    Ok(None)
+                }
+            }
+            TokenType::Case => {
+                stream.advance();
+                let expr = self.expression(stream, 0)?;
+                self.expect(stream, TokenType::Colon)?;
+                Ok(Some(Label::Case{
+                    case_id: "".to_string(),
+                    value: expr,
+                }))
+            }
+            TokenType::Default => {
+                stream.advance();
+                self.expect(stream, TokenType::Colon)?;
+                Ok(Some(Label::Default {
+                    default_id: "".to_string(),
+                }))
+            }
+            _ => Ok(None),
         }
     }
 
@@ -167,6 +192,20 @@ impl Parser {
             condition,
             then_branch: Box::new(then_branch),
             else_branch: else_branch.map(Box::new),
+        })
+    }
+
+    fn switch_statement(&self, stream: &mut TokenStream) -> Result<Statement> {
+        self.expect(stream, TokenType::Switch)?;
+        self.expect(stream, TokenType::LeftParen)?;
+        let condition = self.expression(stream, 0)?;
+        self.expect(stream, TokenType::RightParen)?;
+        let body = Box::new(self.compound_statement(stream)?);
+
+        Ok(SwitchStatement {
+            switch_id: "".to_string(),
+            condition,
+            body
         })
     }
 
@@ -255,7 +294,7 @@ impl Parser {
             TokenType::Semicolon => {
                 self.expect(stream, TokenType::Semicolon)?;
                 ForInit::InitExpression(None)
-            },
+            }
             _ => {
                 let expr = self.expression(stream, 0)?;
                 self.expect(stream, TokenType::Semicolon)?;
@@ -720,6 +759,26 @@ mod tests {
             {
                 return 0;
             }
+        }
+        "#;
+        parse_code(code, true);
+    }
+
+    #[test]
+    fn parse_switch() {
+        let code = r#"
+        int main(void)
+        {
+            int answer = 42;
+
+            switch (answer) {
+            case 42:
+                break;
+            default:
+                return 0;
+            }
+
+            return 1;
         }
         "#;
         parse_code(code, true);

@@ -57,6 +57,9 @@ pub enum TokenType {
     For,
     Break,
     Continue,
+    Switch,
+    Case,
+    Default,
 }
 
 #[derive(Debug, Clone, PartialEq)]

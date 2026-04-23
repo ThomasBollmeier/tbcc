@@ -132,9 +132,14 @@ pub enum Statement {
         then_branch: Box<Statement>,
         else_branch: Option<Box<Statement>>,
     },
+    SwitchStatement {
+        switch_id: String,
+        condition: Expression,
+        body: Box<Statement>,
+    },
     GotoStatement(String),
     LabeledStatement {
-        label: String,
+        label: Label,
         statement: Box<Statement>,
     },
 }
@@ -146,6 +151,34 @@ impl Statement {
 
     pub fn accept_mut<R>(&mut self, visitor: &mut impl VisitorMut<R>) -> R {
         visitor.visit_statement(self)
+    }
+}
+
+#[derive(Debug, Clone)]
+pub enum Label {
+    Label(String),
+    Case{
+        case_id: String,
+        value: Expression,
+    }, // <-- to be used in switch statement
+    Default {
+        default_id: String,
+    }, // <-- to be used in switch statement
+}
+
+impl Label {
+    pub fn get_name(&self) -> Option<String> {
+        match self {
+            Label::Label(name) => Some(name.clone()),
+            _ => None,
+        }
+    }
+
+    pub fn get_case_value(&self) -> Option<&Expression> {
+        match self {
+            Label::Case{ value, ..} => Some(value),
+            _ => None,
+        }
     }
 }
 
