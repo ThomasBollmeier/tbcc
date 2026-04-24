@@ -136,6 +136,7 @@ pub enum Statement {
         switch_id: String,
         condition: Expression,
         body: Box<Statement>,
+        arms: Vec<(String, Option<Expression>)>,
     },
     GotoStatement(String),
     LabeledStatement {

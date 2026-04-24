@@ -87,6 +87,12 @@ impl TackyEmitter {
                 then_branch,
                 else_branch,
             } => self.emit_if_statement(condition, then_branch, else_branch),
+            Statement::SwitchStatement {
+                switch_id,
+                condition,
+                body,
+                arms,
+            } => self.emit_switch_statement(switch_id, condition, body, arms),
             Statement::GotoStatement(label) => self.emit_goto_statement(label),
             Statement::LabeledStatement { label, statement } => {
                 self.emit_labeled_statement(label, statement)
@@ -110,7 +116,6 @@ impl TackyEmitter {
                 post,
                 body,
             } => self.emit_for_statement(loop_id, init, condition, post, body),
-            _ => todo!("Unsupported statement type: {:?}", stmt),
         }
     }
 
@@ -298,6 +303,49 @@ impl TackyEmitter {
         }
 
         instructions.push(Instruction::Label(end_label));
+
+        instructions
+    }
+
+    fn emit_switch_statement(
+        &mut self,
+        switch_id: &str,
+        condition: &Expression,
+        body: &Statement,
+        arms: &Vec<(String, Option<Expression>)>,
+    ) -> Vec<Instruction> {
+        let mut instructions = vec![];
+
+        let condition_value = self.emit_expression(condition, &mut instructions);
+        let break_label = self.make_break_label(switch_id);
+
+        for (label, expression) in arms {
+            match expression {
+                Some(expression) => {
+                    let case_value = self.emit_expression(expression, &mut instructions);
+                    let dst = Value::Variable(self.make_temp_var());
+                    instructions.push(Instruction::Binary {
+                        op: BinaryOperator::Equal,
+                        src1: case_value,
+                        src2: condition_value.clone(),
+                        dst: dst.clone(),
+                    });
+                    instructions.push(Instruction::JumpIfNotZero {
+                        condition: dst,
+                        target: label.clone(),
+                    })
+                }
+                None => instructions.push(Instruction::Jump {
+                    target: label.clone(),
+                }),
+            }
+        }
+
+        instructions.push(Instruction::Jump { target: break_label.clone() });
+
+        instructions.extend(self.emit_statement(body));
+
+        instructions.push(Instruction::Label(break_label));
 
         instructions
     }
@@ -1164,4 +1212,3 @@ mod tests {
         assert_eq!(expected, actual);
     }
 }
-

@@ -1,4 +1,5 @@
-use crate::ast::{Label, Statement};
+use std::collections::HashSet;
+use crate::ast::{Expression, Label, Statement};
 use crate::semantic::walker;
 use crate::semantic::walker::WalkerMut;
 use crate::semantic::{NameGeneratorRef, name_generator};
@@ -8,7 +9,7 @@ pub struct LoopLabeler {
     loop_id_generator: NameGeneratorRef,
     switch_id_generator: NameGeneratorRef,
     target_ids: Vec<TargetId>,
-    cnt_switch_arms: usize,
+    arms: Vec<Vec<(String, Option<Expression>)>>,
 }
 
 impl LoopLabeler {
@@ -17,7 +18,7 @@ impl LoopLabeler {
             loop_id_generator: name_generator::make_loop_id_generator(),
             switch_id_generator: name_generator::make_switch_id_generator(),
             target_ids: Vec::new(),
-            cnt_switch_arms: 0,
+            arms: Vec::new(),
         }
     }
 
@@ -53,6 +54,35 @@ impl LoopLabeler {
         }
         Err(anyhow::anyhow!("not inside a switch statement"))
     }
+
+    fn validate_arms(&mut self, arms: &Vec<(String, Option<Expression>)>) -> Result<()> {
+        let mut cnt_default = 0;
+        let mut case_values: HashSet<i32> = HashSet::new();
+
+        for (_, expr) in arms {
+            match expr {
+                Some(expr) => {
+                    match expr {
+                        Expression::IntegerConstant(value) => {
+                            if case_values.contains(&value) {
+                                return Err(anyhow::anyhow!("case arm value is already used"));
+                            }
+                            case_values.insert(*value);
+                        }
+                        _ => return Err(anyhow::anyhow!("case arm expression is not an integer")),
+                    }
+                }
+                None => {
+                    cnt_default += 1;
+                    if cnt_default > 1 {
+                        return Err(anyhow::anyhow!("not more than one default arm allowed"));
+                    }
+                }
+            }
+        }
+
+        Ok(())
+    }
 }
 
 impl WalkerMut for LoopLabeler {
@@ -70,7 +100,7 @@ impl WalkerMut for LoopLabeler {
                 self.target_ids
                     .push(TargetId::Switch(unique_switch_id.clone()));
                 *switch_id = unique_switch_id;
-                self.cnt_switch_arms = 0;
+                self.arms.push(Vec::new());
             }
             Statement::Break { loop_id } => {
                 *loop_id = self.get_break_target()?;
@@ -79,10 +109,18 @@ impl WalkerMut for LoopLabeler {
                 *loop_id = self.get_innermost_loop_id()?;
             }
             Statement::LabeledStatement { label, .. } => match label {
-                Label::Case { case_id: id, .. } | Label::Default { default_id: id } => {
+                Label::Case { case_id , value } => {
                     let switch_id = self.get_innermost_switch_id()?;
-                    self.cnt_switch_arms += 1;
-                    *id = format!("case.{switch_id}.{}", self.cnt_switch_arms);
+                    let current_arms = self.arms.last_mut().unwrap();
+                    let cnt = current_arms.len() + 1;
+                    *case_id = format!("{switch_id}.case.{cnt}");
+                    current_arms.push((case_id.clone(), Some(value.clone())));
+                }
+                Label::Default { default_id } => {
+                    let switch_id = self.get_innermost_switch_id()?;
+                    *default_id = format!("{switch_id}.default");
+                    let current_arms = self.arms.last_mut().unwrap();
+                    current_arms.push((default_id.clone(), None));
                 }
                 _ => {}
             },
@@ -95,8 +133,14 @@ impl WalkerMut for LoopLabeler {
         match stmt {
             Statement::While { .. }
             | Statement::For { .. }
-            | Statement::DoWhile { .. }
-            | Statement::SwitchStatement { .. } => {
+            | Statement::DoWhile { .. } => {
+                self.target_ids.pop();
+            }
+            Statement::SwitchStatement { arms, .. } => {
+                let current_arms = self.arms.last().unwrap().clone();
+                self.validate_arms(&current_arms)?;
+                *arms = current_arms;
+                self.arms.pop();
                 self.target_ids.pop();
             }
             _ => {}
@@ -114,6 +158,8 @@ enum TargetId {
 mod tests {
     use super::*;
     use crate::ast::{Block, BlockItem, Expression, FunctionDefinition, Label, Program, Statement};
+    use crate::lexer::Lexer;
+    use crate::parser::Parser;
 
     #[test]
     fn rejects_break_outside_loop() {
@@ -304,6 +350,7 @@ mod tests {
                     }),
                 }),
             ]))),
+            arms: Vec::new(),
         });
 
         let mut labeler = LoopLabeler::new();
@@ -323,7 +370,7 @@ mod tests {
                             BlockItem::Statement(Statement::LabeledStatement { label, statement }) => {
                                 match label {
                                     Label::Case { case_id, .. } => {
-                                        assert_eq!(case_id, "case.switch.0.1")
+                                        assert_eq!(case_id, "switch.0.case.1")
                                     }
                                     _ => panic!("Expected first switch arm to be case"),
                                 }
@@ -339,7 +386,7 @@ mod tests {
                             BlockItem::Statement(Statement::LabeledStatement { label, .. }) => {
                                 match label {
                                     Label::Case { case_id, .. } => {
-                                        assert_eq!(case_id, "case.switch.0.2")
+                                        assert_eq!(case_id, "switch.0.case.2")
                                     }
                                     _ => panic!("Expected second switch arm to be case"),
                                 }
@@ -351,7 +398,7 @@ mod tests {
                             BlockItem::Statement(Statement::LabeledStatement { label, statement }) => {
                                 match label {
                                     Label::Default { default_id } => {
-                                        assert_eq!(default_id, "case.switch.0.3")
+                                        assert_eq!(default_id, "switch.0.default")
                                     }
                                     _ => panic!("Expected third switch arm to be default"),
                                 }
@@ -369,6 +416,61 @@ mod tests {
             _ => panic!("Expected top-level statement to be switch"),
         }
     }
+
+    #[test]
+    fn switch_nested_switch() {
+        let code = r#"
+        int main(void){
+            switch(3) {
+                case 0:
+                    return 0;
+                case 3: {
+                    switch(4) {
+                        case 3: return 0;
+                        case 4: return 1;
+                        default: return 0;
+                    }
+                }
+                case 4: return 0;
+                default: return 0;
+            }
+        }
+        "#;
+
+        let mut program = parse_code(code).expect("Expected code to parse");
+        let mut labeler = LoopLabeler::new();
+        labeler.label_loops(&mut program).expect("Expected loop labeling to succeed");
+    }
+
+    #[test]
+    fn finds_duplicate_label() {
+        let code = r#"
+        int main(void) {
+            switch(4) {
+                case 5: return 0;
+                case 4: return 1;
+                case 5: return 0; // duplicate of previous case 5
+                default: return 2;
+            }
+        }
+        "#;
+
+        let mut program = parse_code(code).expect("Expected code to parse");
+        let mut labeler = LoopLabeler::new();
+        match labeler.label_loops(&mut program) {
+            Ok(_) => panic!("Expected label loops to fail"),
+            Err(_) => {}
+        }
+    }
+
+    fn parse_code(code: &str) -> Result<Program> {
+        let parser = Parser::new();
+        let lexer = Lexer::new();
+
+        let tokens = lexer.scan_tokens(code).expect("Failed to scan tokens");
+        parser.parse(tokens)
+    }
+
 
     fn program_with_statement(statement: Statement) -> Program {
         Program::new(FunctionDefinition::new(

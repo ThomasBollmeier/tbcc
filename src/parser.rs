@@ -88,7 +88,7 @@ impl Parser {
     }
 
     fn statement(&self, stream: &mut TokenStream) -> Result<Statement> {
-        if let Ok(Some(label)) = self.get_label(stream) {
+        if let Some(label) = self.get_label(stream)? {
             let statement = self.statement(stream)?;
             return Ok(Statement::LabeledStatement {
                 label,
@@ -200,12 +200,13 @@ impl Parser {
         self.expect(stream, TokenType::LeftParen)?;
         let condition = self.expression(stream, 0)?;
         self.expect(stream, TokenType::RightParen)?;
-        let body = Box::new(self.compound_statement(stream)?);
+        let body = Box::new(self.statement(stream)?);
 
         Ok(SwitchStatement {
             switch_id: "".to_string(),
             condition,
-            body
+            body,
+            arms: Vec::new(),
         })
     }
 
