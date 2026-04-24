@@ -206,7 +206,7 @@ mod tests {
             _ => panic!("Expected first body item to be an if statement"),
         };
 
-        let resolved_label = resolved_label.get_name().expect("Expected label to be a simple label");
+        let resolved_label = resolved_label.get_name();
 
         assert_eq!(resolved_label, "label_0");
 

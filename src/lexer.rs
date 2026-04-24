@@ -26,6 +26,7 @@ impl Lexer {
         };
 
         lexer.add_token_type_full(TokenType::Whitespace, r"\s+", true, None);
+        lexer.add_token_type_full(TokenType::LineComment, r"//.*", true, None);
 
         lexer.add_token_type_full(
             TokenType::IntegerConstant,

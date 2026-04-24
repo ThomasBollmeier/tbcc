@@ -1,7 +1,7 @@
 use crate::assembly::ast::{
     ConditionCode, FuncDef, Instruction, Operand, Program, Register, UnaryOp,
 };
-use crate::tacky::{
+use crate::tacky::ast::{
     BinaryOperator as TackyBinOp, BinaryOperator, FunctionDef, Instruction as TackyInstruction,
     UnaryOperator, Value,
 };
@@ -16,7 +16,7 @@ impl AssemblyCreator {
 
     pub fn create_program(
         &mut self,
-        tacky_program: &crate::tacky::Program,
+        tacky_program: &crate::tacky::ast::Program,
     ) -> anyhow::Result<Program> {
         let func_def = self.create_func_def(&tacky_program.func_def)?;
 
@@ -310,7 +310,7 @@ impl AssemblyCreator {
     }
 
     fn map_unary_operator(&self, unary_op: &UnaryOperator) -> UnaryOp {
-        use crate::tacky::UnaryOperator::*;
+        use crate::tacky::ast::UnaryOperator::*;
         match unary_op {
             Negate => UnaryOp::Neg,
             Complement => UnaryOp::Not,
@@ -319,7 +319,7 @@ impl AssemblyCreator {
     }
 
     fn map_binary_operator(&self, binary_op: &TackyBinOp) -> crate::assembly::ast::BinaryOp {
-        use crate::tacky::BinaryOperator::*;
+        use crate::tacky::ast::BinaryOperator::*;
         match binary_op {
             Add => crate::assembly::ast::BinaryOp::Add,
             Subtract => crate::assembly::ast::BinaryOp::Sub,
@@ -336,7 +336,7 @@ impl AssemblyCreator {
     }
 
     fn map_relational_operator(&self, relational_op: &TackyBinOp) -> ConditionCode {
-        use crate::tacky::BinaryOperator::*;
+        use crate::tacky::ast::BinaryOperator::*;
         match relational_op {
             Equal => ConditionCode::Eq,
             NotEqual => ConditionCode::NotEq,
@@ -359,10 +359,11 @@ mod tests {
     use crate::lexer::Lexer;
     use crate::parser::Parser;
     use crate::semantic;
-    use crate::tacky::{
+    use crate::tacky::ast::{
         BinaryOperator, FunctionDef as TackyFunctionDef, Instruction as TackyInstruction,
-        Program as TackyProgram, TackyEmitter, Value,
+        Program as TackyProgram, Value,
     };
+    use crate::tacky::TackyEmitter;
 
     fn make_emitter() -> TackyEmitter {
         let label_name_gen = semantic::make_label_name_generator();

@@ -167,10 +167,11 @@ pub enum Label {
 }
 
 impl Label {
-    pub fn get_name(&self) -> Option<String> {
+    pub fn get_name(&self) -> String {
         match self {
-            Label::Label(name) => Some(name.clone()),
-            _ => None,
+            Label::Label(name) => name.clone(),
+            Label::Case { case_id, ..} => case_id.clone(),
+            Label::Default { default_id } => default_id.clone(),
         }
     }
 

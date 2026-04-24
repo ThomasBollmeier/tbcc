@@ -1,6 +1,7 @@
 #[derive(Debug, Clone, PartialEq)]
 pub enum TokenType {
     Whitespace,
+    LineComment,
     Identifier,
     IntegerConstant,
     Int,
