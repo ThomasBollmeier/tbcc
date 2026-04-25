@@ -1,20 +1,26 @@
 #[derive(Debug)]
-pub struct Program(pub FuncDef);
+pub struct Program{
+    pub functions: Vec<FuncDef>,
+}
 
 impl Program {
-    pub fn new(def: FuncDef) -> Self {
-        Self(def)
+    pub fn new(functions: Vec<FuncDef>) -> Self {
+        Self { functions }
     }
 
     pub fn walk(&self, visitor: &mut impl Visitor) {
         visitor.enter_program(self);
-        Self::walk_func_def(&self.0, visitor);
+        for function in &self.functions {
+            Self::walk_func_def(function, visitor);
+        }
         visitor.exit_program(self);
     }
 
     pub fn walk_mut(&mut self, visitor: &mut impl VisitorMut) {
         visitor.enter_program(self);
-        Self::walk_func_def_mut(&mut self.0, visitor);
+        for function in &mut self.functions {
+            Self::walk_func_def_mut(function, visitor);
+        }
         visitor.exit_program(self);
     }
 

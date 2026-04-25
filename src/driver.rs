@@ -56,27 +56,39 @@ pub fn compile(options: &Options) -> Result<()> {
     let assembly_file = create_assembly_file(&options.source, &assembly_code)?;
 
     if !options.dont_assemble {
-        create_exec_file(&assembly_file)?;
+        create_output_file(&assembly_file, options)?;
         remove_file(&assembly_file)?;
     }
 
     Ok(())
 }
 
-fn create_exec_file(assembly_file: &str) -> Result<String> {
-    let exec_file = create_file_name_with_new_extension(assembly_file, "")?;
+fn create_output_file(assembly_file: &str, options: &Options) -> Result<String> {
+    let new_extension = if !options.dont_link {
+        ""
+    } else {
+        "o"
+    };
+    let output_file = create_file_name_with_new_extension(assembly_file, new_extension)?;
 
-    let status = Command::new("gcc")
-        .arg(assembly_file)
-        .arg("-o")
-        .arg(&exec_file)
-        .status()?;
+    let status = {
+        let mut cmd = Command::new("gcc");
+        cmd.arg(assembly_file);
+        if options.dont_link {
+            cmd.arg("-c");
+        }
+        let status = cmd
+            .arg("-o")
+            .arg(&output_file)
+            .status()?;
+        status
+    };
 
     if !status.success() {
         return Err(anyhow!("gcc preprocessing failed with status: {status}"));
     }
 
-    Ok(exec_file)
+    Ok(output_file)
 }
 
 fn create_assembly_file(source_file: &str, assembly_code: &str) -> Result<String> {

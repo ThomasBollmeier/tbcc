@@ -109,7 +109,7 @@ mod tests {
 
     #[test]
     fn resolves_variable_names_in_declarations_and_usages() {
-        let mut program = resolve_code(
+        let program = resolve_code(
             r#"
             int main(void) {
                 int x = 1;
@@ -121,7 +121,15 @@ mod tests {
         )
         .expect("Expected variable resolver to succeed");
 
-        let body = &mut program.function_definition.body.items;
+        let body = program
+            .function_decls
+            .get(0)
+            .expect("Expected main function to be present")
+            .body
+            .as_ref()
+            .expect("Expected main function body to be present");
+
+        let body = &body.items;
 
         match &body[0] {
             BlockItem::Declaration(decl) => assert_eq!(decl.name, "var.x.0"),

@@ -136,10 +136,10 @@ mod tests {
     use crate::assembly::ast::{FuncDef, Instruction, Operand, Program, Register, UnaryOp};
 
     fn apply_fixer(instructions: Vec<Instruction>, stack_frame_size: usize) -> Vec<Instruction> {
-        let mut program = Program::new(FuncDef::new("main".to_string(), instructions));
+        let mut program = Program::new(vec![FuncDef::new("main".to_string(), instructions)]);
         let mut fixer = InstructionFixer::new(stack_frame_size);
         program.walk_mut(&mut fixer);
-        program.0.instructions
+        program.functions[0].instructions.clone()
     }
 
     #[test]

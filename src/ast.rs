@@ -1,40 +1,34 @@
 #[derive(Debug, Clone)]
 pub struct Program {
-    pub function_definition: FunctionDefinition,
+    pub function_decls: Vec<FunctionDeclaration>,
 }
 
 impl Program {
-    pub fn new(function_definition: FunctionDefinition) -> Self {
+    pub fn new() -> Self {
         Program {
-            function_definition,
+            function_decls: vec![],
         }
     }
 
-    pub fn accept<R>(&self, visitor: &mut impl Visitor<R>) -> R {
-        visitor.visit_program(self)
-    }
-    pub fn accept_mut<R>(&mut self, visitor: &mut impl VisitorMut<R>) -> R {
-        visitor.visit_program(self)
+    pub fn add_function_decl(&mut self, function_decl: FunctionDeclaration) {
+        self.function_decls.push(function_decl);
     }
 }
 
 #[derive(Debug, Clone)]
-pub struct FunctionDefinition {
+pub struct FunctionDeclaration {
     pub name: String,
-    pub body: Block,
+    pub parameters: Vec<String>,
+    pub body: Option<Block>,
 }
 
-impl FunctionDefinition {
-    pub fn new(name: String, body: Block) -> Self {
-        FunctionDefinition { name, body }
-    }
-
-    pub fn accept<R>(&self, visitor: &mut impl Visitor<R>) -> R {
-        visitor.visit_function_definition(self)
-    }
-
-    pub fn accept_mut<R>(&mut self, visitor: &mut impl VisitorMut<R>) -> R {
-        visitor.visit_function_definition(self)
+impl FunctionDeclaration {
+    pub fn new(name: String, parameters: Vec<String>, body: Option<Block>) -> Self {
+        FunctionDeclaration {
+            name,
+            parameters,
+            body,
+        }
     }
 }
 
@@ -47,35 +41,13 @@ impl Block {
     pub fn new(items: Vec<BlockItem>) -> Self {
         Block { items }
     }
-    pub fn accept<R>(&self, visitor: &mut impl Visitor<R>) -> R {
-        visitor.visit_block(self)
-    }
-
-    pub fn accept_mut<R>(&mut self, visitor: &mut impl VisitorMut<R>) -> R {
-        visitor.visit_block(self)
-    }
 }
 
 #[derive(Debug, Clone)]
 pub enum BlockItem {
     Declaration(Declaration),
+    FunctionDeclaration(FunctionDeclaration),
     Statement(Statement),
-}
-
-impl BlockItem {
-    pub fn accept<R>(&self, visitor: &mut impl Visitor<R>) -> R {
-        match self {
-            BlockItem::Declaration(d) => d.accept(visitor),
-            BlockItem::Statement(s) => s.accept(visitor),
-        }
-    }
-
-    pub fn accept_mut<R>(&mut self, visitor: &mut impl VisitorMut<R>) -> R {
-        match self {
-            BlockItem::Declaration(d) => d.accept_mut(visitor),
-            BlockItem::Statement(s) => s.accept_mut(visitor),
-        }
-    }
 }
 
 #[derive(Debug, Clone)]
@@ -87,14 +59,6 @@ pub struct Declaration {
 impl Declaration {
     pub fn new(name: String, init_expr: Option<Expression>) -> Self {
         Declaration { name, init_expr }
-    }
-
-    pub fn accept<R>(&self, visitor: &mut impl Visitor<R>) -> R {
-        visitor.visit_declaration(self)
-    }
-
-    pub fn accept_mut<R>(&mut self, visitor: &mut impl VisitorMut<R>) -> R {
-        visitor.visit_declaration(self)
     }
 }
 
@@ -145,16 +109,6 @@ pub enum Statement {
     },
 }
 
-impl Statement {
-    pub fn accept<R>(&self, visitor: &mut impl Visitor<R>) -> R {
-        visitor.visit_statement(self)
-    }
-
-    pub fn accept_mut<R>(&mut self, visitor: &mut impl VisitorMut<R>) -> R {
-        visitor.visit_statement(self)
-    }
-}
-
 #[derive(Debug, Clone)]
 pub enum Label {
     Label(String),
@@ -194,6 +148,10 @@ pub enum ForInit {
 pub enum Expression {
     IntegerConstant(i32),
     Var(String),
+    FuncCall{
+        name: String,
+        args: Vec<Expression>,
+    },
     UnaryExpr(UnaryOp, Box<Expression>),
     BinaryExpr(BinaryOp, Box<Expression>, Box<Expression>),
     Assignment {
@@ -206,16 +164,6 @@ pub enum Expression {
         then_expr: Box<Expression>,
         else_expr: Box<Expression>,
     },
-}
-
-impl Expression {
-    pub fn accept<R>(&self, visitor: &mut impl Visitor<R>) -> R {
-        visitor.visit_expression(self)
-    }
-
-    pub fn accept_mut<R>(&mut self, visitor: &mut impl VisitorMut<R>) -> R {
-        visitor.visit_expression(self)
-    }
 }
 
 #[derive(Debug, Clone)]
@@ -275,22 +223,4 @@ impl From<&BinaryOp> for Associativity {
             _ => Associativity::Left,
         }
     }
-}
-
-pub trait Visitor<A> {
-    fn visit_program(&mut self, program: &Program) -> A;
-    fn visit_function_definition(&mut self, func_def: &FunctionDefinition) -> A;
-    fn visit_block(&mut self, block: &Block) -> A;
-    fn visit_declaration(&mut self, decl: &Declaration) -> A;
-    fn visit_statement(&mut self, stmt: &Statement) -> A;
-    fn visit_expression(&mut self, expr: &Expression) -> A;
-}
-
-pub trait VisitorMut<A> {
-    fn visit_program(&mut self, program: &mut Program) -> A;
-    fn visit_function_definition(&mut self, func_def: &mut FunctionDefinition) -> A;
-    fn visit_block(&mut self, block: &mut Block) -> A;
-    fn visit_declaration(&mut self, decl: &mut Declaration) -> A;
-    fn visit_statement(&mut self, stmt: &mut Statement) -> A;
-    fn visit_expression(&mut self, expr: &mut Expression) -> A;
 }

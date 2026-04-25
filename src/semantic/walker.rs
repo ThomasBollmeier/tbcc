@@ -1,4 +1,4 @@
-use crate::ast::{Block, Declaration, Expression, ForInit, FunctionDefinition, Program, Statement};
+use crate::ast::{Block, Declaration, Expression, ForInit, FunctionDeclaration, Program, Statement};
 use anyhow::Result;
 
 #[allow(unused_variables)]
@@ -10,10 +10,10 @@ pub trait WalkerMut {
         Ok(())
     }
 
-    fn enter_func_def(&mut self, func_def: &mut FunctionDefinition) -> Result<()> {
+    fn enter_func_def(&mut self, func_def: &mut FunctionDeclaration) -> Result<()> {
         Ok(())
     }
-    fn leave_func_def(&mut self, func_def: &mut FunctionDefinition) -> Result<()> {
+    fn leave_func_def(&mut self, func_def: &mut FunctionDeclaration) -> Result<()> {
         Ok(())
     }
 
@@ -48,15 +48,19 @@ pub trait WalkerMut {
 
 pub fn walk(program: &mut Program, walker: &mut impl WalkerMut) -> Result<()> {
     walker.enter_program(program)?;
-    walk_func_def(&mut program.function_definition, walker)?;
+    for function_decl in &mut program.function_decls {
+        walk_function_decl(function_decl, walker)?;
+    }
     walker.leave_program(program)?;
     Ok(())
 }
 
-fn walk_func_def(func_def: &mut FunctionDefinition, walker: &mut impl WalkerMut) -> Result<()> {
-    walker.enter_func_def(func_def)?;
-    walk_block(&mut func_def.body, walker)?;
-    walker.leave_func_def(func_def)?;
+fn walk_function_decl(func_decl: &mut FunctionDeclaration, walker: &mut impl WalkerMut) -> Result<()> {
+    walker.enter_func_def(func_decl)?;
+    if let Some(body) = &mut func_decl.body {
+        walk_block(body, walker)?;
+    }
+    walker.leave_func_def(func_decl)?;
     Ok(())
 }
 
@@ -64,6 +68,9 @@ fn walk_block(block: &mut Block, walker: &mut impl WalkerMut) -> Result<()> {
     walker.enter_block(block)?;
     for item in &mut block.items {
         match item {
+            crate::ast::BlockItem::FunctionDeclaration(func_decl) => {
+                walk_function_decl(func_decl, walker)?;
+            }
             crate::ast::BlockItem::Declaration(decl) => {
                 walk_declaration(decl, walker)?;
             }
@@ -172,6 +179,11 @@ fn walk_expression(expr: &mut Expression, walker: &mut impl WalkerMut) -> Result
     match expr {
         IntegerConstant(_) => {}
         Var(_) => {}
+        FuncCall {args, ..} => {
+            for arg in args {
+                walk_expression(arg, walker)?;
+            }
+        }
         UnaryExpr(_, expr) => {
             walk_expression(expr, walker)?;
         }

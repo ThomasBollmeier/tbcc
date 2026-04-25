@@ -1,10 +1,10 @@
 #[derive(Debug, Clone, PartialEq)]
 pub struct Program {
-    pub func_def: FunctionDef,
+    pub functions: Vec<Function>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct FunctionDef {
+pub struct Function {
     pub name: String,
     pub body: Vec<Instruction>,
 }

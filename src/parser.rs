@@ -1,7 +1,7 @@
 use crate::ast::Statement::{For, IfStatement, Return, SwitchStatement};
 use crate::ast::{
     Associativity, BinaryOp, Block, BlockItem, Declaration, Expression, ForInit,
-    FunctionDefinition, Label, Program, Statement, UnaryOp,
+    FunctionDeclaration, Label, Program, Statement, UnaryOp,
 };
 use crate::token::{Token, TokenStream, TokenType, TokenValue};
 use anyhow::{Result, anyhow};
@@ -25,23 +25,74 @@ impl Parser {
     }
 
     fn program(&self, stream: &mut TokenStream) -> Result<Program> {
-        let func_def = self.function_definition(stream)?;
-        Ok(Program::new(func_def))
+        let mut program = Program::new();
+        while let Some(_) = stream.peek() {
+            program.add_function_decl(self.function_declaration(stream)?);
+        }
+
+        Ok(program)
     }
 
-    fn function_definition(&self, stream: &mut TokenStream) -> Result<FunctionDefinition> {
+    fn function_declaration(&self, stream: &mut TokenStream) -> Result<FunctionDeclaration> {
         self.expect(stream, TokenType::Int)?;
 
         let name_token = self.expect(stream, TokenType::Identifier)?;
         let name = name_token.lexeme;
 
+        let mut parameters = vec![];
         self.expect(stream, TokenType::LeftParen)?;
-        self.expect(stream, TokenType::Void)?;
+        loop {
+            let token = stream
+                .peek()
+                .ok_or_else(|| anyhow!("Unexpected end of input in parameter list"))?;
+
+            match token.token_type {
+                TokenType::Void => {
+                    if parameters.is_empty() {
+                        stream.advance();
+                        break;
+                    } else {
+                        return Err(anyhow!("Unexpected 'void' in parameter list"));
+                    }
+                }
+                TokenType::Int => {
+                    if !parameters.is_empty() {
+                        return Err(anyhow!("Unexpected 'int' in parameter list"));
+                    }
+                    stream.advance();
+                    let param_name_token = self.expect(stream, TokenType::Identifier)?;
+                    parameters.push(param_name_token.lexeme);
+                }
+                TokenType::Comma => {
+                    if parameters.is_empty() {
+                        return Err(anyhow!("Unexpected ',' in parameter list"));
+                    }
+                    stream.advance();
+                    self.expect(stream, TokenType::Int)?;
+                    let param_name_token = self.expect(stream, TokenType::Identifier)?;
+                    parameters.push(param_name_token.lexeme);
+                }
+                TokenType::RightParen => {
+                    break;
+                }
+                _ => return Err(anyhow!("Unexpected token {:?} in parameter list", token)),
+            }
+        }
         self.expect(stream, TokenType::RightParen)?;
 
-        let body = self.block(stream)?;
+        let next_token = stream
+            .peek()
+            .ok_or_else(|| anyhow!("Unexpected end of input after function declaration"))?;
 
-        Ok(FunctionDefinition::new(name, body))
+        let body = match next_token.token_type {
+            TokenType::Semicolon => {
+                stream.advance();
+                None
+            }
+            _ => Some(self.block(stream)?),
+        };
+
+        Ok(FunctionDeclaration::new(name, parameters, body))
     }
 
     fn block(&self, stream: &mut TokenStream) -> Result<Block> {
@@ -53,6 +104,15 @@ impl Parser {
             match token.token_type {
                 TokenType::RightBrace => break,
                 TokenType::Int => {
+                    let token_third = stream.peek_with_offset(2);
+                    if let Some(token_third) = token_third {
+                        if token_third.token_type == TokenType::LeftParen {
+                            items.push(BlockItem::FunctionDeclaration(
+                                self.function_declaration(stream)?,
+                            ));
+                            continue;
+                        }
+                    }
                     items.push(BlockItem::Declaration(self.declaration(stream)?));
                 }
                 _ => {
@@ -140,7 +200,7 @@ impl Parser {
                 stream.advance();
                 let expr = self.expression(stream, 0)?;
                 self.expect(stream, TokenType::Colon)?;
-                Ok(Some(Label::Case{
+                Ok(Some(Label::Case {
                     case_id: "".to_string(),
                     value: expr,
                 }))
@@ -498,7 +558,22 @@ impl Parser {
                     return Err(anyhow!("Expected integer constant value"));
                 }
             }
-            TokenType::Identifier => Expression::Var(token.lexeme),
+            TokenType::Identifier => {
+                let name = token.lexeme.clone();
+                let is_func_call = if let Some(next_token) = stream.peek() {
+                    next_token.token_type == TokenType::LeftParen
+                } else {
+                    false
+                };
+                if is_func_call {
+                    Expression::FuncCall {
+                        name,
+                        args: self.argument_list(stream)?,
+                    }
+                } else {
+                    Expression::Var(name)
+                }
+            }
             TokenType::Minus | TokenType::Tilde | TokenType::LogicalNot => {
                 let op = self.get_unary_op(&token.token_type).unwrap();
                 Expression::UnaryExpr(op, Box::new(self.factor(stream)?))
@@ -544,6 +619,30 @@ impl Parser {
         }
 
         Ok(expr)
+    }
+
+    fn argument_list(&self, stream: &mut TokenStream) -> Result<Vec<Expression>> {
+        let mut args = Vec::new();
+        self.expect(stream, TokenType::LeftParen)?;
+        loop {
+            let token = stream
+                .peek()
+                .ok_or_else(|| anyhow!("Unexpected end of input in argument list"))?;
+            match token.token_type {
+                TokenType::RightParen => break,
+                TokenType::Comma => {
+                    if args.is_empty() {
+                        return Err(anyhow!("Unexpected comma in argument list"));
+                    }
+                    self.consume(stream)?; // consume comma
+                    args.push(self.expression(stream, 0)?);
+                }
+                _ => args.push(self.expression(stream, 0)?),
+            }
+        }
+        self.expect(stream, TokenType::RightParen)?;
+
+        Ok(args)
     }
 
     fn create_postfix_assignment(&self, op: BinaryOp, expr: &Expression) -> Expression {
@@ -807,6 +906,27 @@ mod tests {
                     } while ((iterations = iterations - 1) > 0);
             }
             return (count == 0 && iterations == 0);
+        }
+        "#;
+        parse_code(code, true);
+    }
+
+    #[test]
+    fn parse_functions() {
+        let code = r#"
+        int do_something(int a);
+        int do_two_things(int a, int b) {
+            return
+                do_something(a) +
+                do_something(b);
+        }
+
+        int main(void)
+        {
+            for (i = 0; i < 1; i = i + 1)
+            {
+                return 0;
+            }
         }
         "#;
         parse_code(code, true);

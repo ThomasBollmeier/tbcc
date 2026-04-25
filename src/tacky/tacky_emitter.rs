@@ -1,5 +1,5 @@
 use crate::ast::{
-    BinaryOp, Block, BlockItem, Declaration, Expression, ForInit, FunctionDefinition, Label,
+    BinaryOp, Block, BlockItem, Declaration, Expression, ForInit, FunctionDeclaration, Label,
     Statement, UnaryOp,
 };
 use crate::semantic::NameGeneratorRef;
@@ -7,7 +7,7 @@ use anyhow::Result;
 
 use super::ast::Instruction::Unary;
 use super::ast::Value::IntegerConstant;
-use super::ast::{BinaryOperator, FunctionDef, Instruction, Program, UnaryOperator, Value};
+use super::ast::{BinaryOperator, Function, Instruction, Program, UnaryOperator, Value};
 
 #[derive(Clone)]
 pub struct TackyEmitter {
@@ -27,29 +27,39 @@ impl TackyEmitter {
     }
 
     pub fn emit_program(&mut self, program: &crate::ast::Program) -> Result<Program> {
-        let func_def = self.emit_function_def(&program.function_definition)?;
+        let functions = program
+            .function_decls
+            .iter()
+            .map(|func_decl| self.emit_function_decl(func_decl))
+            .collect::<Vec<Function>>();
 
-        Ok(Program { func_def })
+        Ok(Program { functions })
     }
 
-    fn emit_function_def(
-        &mut self,
-        function_definition: &FunctionDefinition,
-    ) -> Result<FunctionDef> {
-        let name = function_definition.name.clone();
-        let mut instructions = self.emit_block(&function_definition.body);
-        instructions.push(Instruction::Return(IntegerConstant(0))); // Ensure function ends with a return
+    fn emit_function_decl(&mut self, function_declaration: &FunctionDeclaration) -> Function {
+        let name = function_declaration.name.clone();
+        let instructions = if let Some(body) = &function_declaration.body {
+            let mut instructions = self.emit_block(body);
+            instructions.push(Instruction::Return(IntegerConstant(0))); // Ensure function ends with a return
+            instructions
+        } else {
+            vec![]
+        };
 
-        Ok(FunctionDef {
+        Function {
             name,
             body: instructions,
-        })
+        }
     }
 
     fn emit_block(&mut self, block: &Block) -> Vec<Instruction> {
         let mut instructions = vec![];
         for item in &block.items {
             match item {
+                BlockItem::FunctionDeclaration(func_decl) => {
+                    let func = self.emit_function_decl(func_decl);
+                    instructions.extend(func.body.clone());
+                }
                 BlockItem::Declaration(decl) => {
                     instructions.extend(self.emit_declaration(decl));
                 }
@@ -341,7 +351,9 @@ impl TackyEmitter {
             }
         }
 
-        instructions.push(Instruction::Jump { target: break_label.clone() });
+        instructions.push(Instruction::Jump {
+            target: break_label.clone(),
+        });
 
         instructions.extend(self.emit_statement(body));
 
@@ -506,6 +518,7 @@ impl TackyEmitter {
 
                 result
             }
+            _ => unimplemented!(),
         }
     }
 

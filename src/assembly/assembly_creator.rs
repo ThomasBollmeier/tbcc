@@ -2,7 +2,7 @@ use crate::assembly::ast::{
     ConditionCode, FuncDef, Instruction, Operand, Program, Register, UnaryOp,
 };
 use crate::tacky::ast::{
-    BinaryOperator as TackyBinOp, BinaryOperator, FunctionDef, Instruction as TackyInstruction,
+    BinaryOperator as TackyBinOp, BinaryOperator, Function, Instruction as TackyInstruction,
     UnaryOperator, Value,
 };
 
@@ -18,12 +18,15 @@ impl AssemblyCreator {
         &mut self,
         tacky_program: &crate::tacky::ast::Program,
     ) -> anyhow::Result<Program> {
-        let func_def = self.create_func_def(&tacky_program.func_def)?;
+        let mut functions = vec![];
+        for function in &tacky_program.functions {
+            functions.push(self.create_func_def(function)?);
+        }
 
-        Ok(Program(func_def))
+        Ok(Program::new(functions))
     }
 
-    fn create_func_def(&mut self, func_def: &FunctionDef) -> anyhow::Result<FuncDef> {
+    fn create_func_def(&mut self, func_def: &Function) -> anyhow::Result<FuncDef> {
         let name = func_def.name.clone();
         let instructions = self.create_instructions(&func_def.body)?;
 
@@ -359,11 +362,11 @@ mod tests {
     use crate::lexer::Lexer;
     use crate::parser::Parser;
     use crate::semantic;
+    use crate::tacky::TackyEmitter;
     use crate::tacky::ast::{
-        BinaryOperator, FunctionDef as TackyFunctionDef, Instruction as TackyInstruction,
+        BinaryOperator, Function as TackyFunctionDef, Instruction as TackyInstruction,
         Program as TackyProgram, Value,
     };
-    use crate::tacky::TackyEmitter;
 
     fn make_emitter() -> TackyEmitter {
         let label_name_gen = semantic::make_label_name_generator();
@@ -397,7 +400,7 @@ mod tests {
     #[test]
     fn creates_asm_program_with_binary_ops() {
         let tacky_program = TackyProgram {
-            func_def: TackyFunctionDef {
+            functions: vec![TackyFunctionDef {
                 name: "main".to_string(),
                 body: vec![
                     TackyInstruction::Binary {
@@ -432,7 +435,7 @@ mod tests {
                     },
                     TackyInstruction::Return(Value::Variable("tmp.4".to_string())),
                 ],
-            },
+            }],
         };
 
         let mut assembly_creator = AssemblyCreator::new();
@@ -440,7 +443,9 @@ mod tests {
             .create_program(&tacky_program)
             .expect("Failed to create assembly program");
 
-        let instructions = &assembly_program.0.instructions;
+        let main_func = &assembly_program.functions[0];
+
+        let instructions = &main_func.instructions;
         assert_eq!(instructions.len(), 16);
 
         assert!(matches!(

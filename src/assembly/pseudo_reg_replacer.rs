@@ -90,11 +90,13 @@ mod tests {
     use crate::assembly::ast::{FuncDef, Instruction, Operand, Program, Register, UnaryOp};
 
     fn apply_replacer(instructions: Vec<Instruction>) -> (Vec<Instruction>, usize) {
-        let mut program = Program::new(FuncDef::new("main".to_string(), instructions));
+        let mut program = Program::new(vec![FuncDef::new("main".to_string(), instructions)]);
         let mut replacer = PseudoRegReplacer::new();
         program.walk_mut(&mut replacer);
 
-        (program.0.instructions, replacer.get_frame_size())
+        let instructions = program.functions[0].instructions.clone();
+
+        (instructions, replacer.get_frame_size())
     }
 
     #[test]

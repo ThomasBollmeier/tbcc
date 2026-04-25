@@ -1,4 +1,4 @@
-use crate::ast::{FunctionDefinition, Label, Program, Statement};
+use crate::ast::{FunctionDeclaration, Label, Program, Statement};
 use crate::semantic::name_generator::NameGeneratorRef;
 use crate::semantic::scope::{NamingData, Scope, ScopeRef};
 use crate::semantic::walker;
@@ -77,7 +77,7 @@ impl LabelResolver {
                 }
                 name
             }
-            Label::Case{..} | Label::Default{..} => return Ok(()),
+            Label::Case { .. } | Label::Default { .. } => return Ok(()),
         };
 
         match self.check_for_unique_name(label_name)? {
@@ -131,12 +131,12 @@ impl LabelResolver {
 }
 
 impl WalkerMut for LabelResolver {
-    fn enter_func_def(&mut self, _: &mut FunctionDefinition) -> Result<()> {
+    fn enter_func_def(&mut self, _: &mut FunctionDeclaration) -> Result<()> {
         self.current_scope = Some(Scope::new_ref(None, self.label_name_generator.clone()));
         Ok(())
     }
 
-    fn leave_func_def(&mut self, _: &mut FunctionDefinition) -> Result<()> {
+    fn leave_func_def(&mut self, _: &mut FunctionDeclaration) -> Result<()> {
         self.check_for_undeclared_labels()?;
         self.current_scope = None;
         Ok(())
@@ -167,7 +167,7 @@ mod tests {
 
     #[test]
     fn resolves_label_used_after_if_branch_declaration() {
-        let mut program = resolve_code(
+        let program = resolve_code(
             r#"
             int main(void) {
                 if (0)
@@ -180,7 +180,15 @@ mod tests {
         )
         .expect("Expected label resolver to succeed for label declared in if branch");
 
-        let body = &mut program.function_definition.body.items;
+        let main_func = program
+            .function_decls
+            .get(0)
+            .expect("Expected main function to be present");
+        let body = main_func
+            .body
+            .as_ref()
+            .expect("Expected main function to be present");
+        let body = &body.items;
 
         let resolved_label = match &body[0] {
             BlockItem::Statement(Statement::IfStatement {

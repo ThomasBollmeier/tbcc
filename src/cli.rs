@@ -6,7 +6,7 @@
 #[command(about="A compiler for a simplified C", long_about = None)]
 #[command(group(
     clap::ArgGroup::new("compile_step")
-        .args(["lex", "parse", "validate", "tacky", "codegen", "dont_assemble"])
+        .args(["lex", "parse", "validate", "tacky", "codegen", "dont_assemble", "dont_link"])
         .multiple(false)
 ))]
 pub struct Options {
@@ -23,4 +23,6 @@ pub struct Options {
     pub codegen: bool,
     #[arg(short = 'S', help = "do not assemble and link")]
     pub dont_assemble: bool,
+    #[arg(short = 'c', help = "do not link")]
+    pub dont_link: bool,
 }

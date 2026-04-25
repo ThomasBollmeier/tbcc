@@ -1,9 +1,9 @@
-use std::collections::HashSet;
 use crate::ast::{Expression, Label, Statement};
 use crate::semantic::walker;
 use crate::semantic::walker::WalkerMut;
 use crate::semantic::{NameGeneratorRef, name_generator};
 use anyhow::Result;
+use std::collections::HashSet;
 
 pub struct LoopLabeler {
     loop_id_generator: NameGeneratorRef,
@@ -61,17 +61,15 @@ impl LoopLabeler {
 
         for (_, expr) in arms {
             match expr {
-                Some(expr) => {
-                    match expr {
-                        Expression::IntegerConstant(value) => {
-                            if case_values.contains(&value) {
-                                return Err(anyhow::anyhow!("case arm value is already used"));
-                            }
-                            case_values.insert(*value);
+                Some(expr) => match expr {
+                    Expression::IntegerConstant(value) => {
+                        if case_values.contains(&value) {
+                            return Err(anyhow::anyhow!("case arm value is already used"));
                         }
-                        _ => return Err(anyhow::anyhow!("case arm expression is not an integer")),
+                        case_values.insert(*value);
                     }
-                }
+                    _ => return Err(anyhow::anyhow!("case arm expression is not an integer")),
+                },
                 None => {
                     cnt_default += 1;
                     if cnt_default > 1 {
@@ -109,7 +107,7 @@ impl WalkerMut for LoopLabeler {
                 *loop_id = self.get_innermost_loop_id()?;
             }
             Statement::LabeledStatement { label, .. } => match label {
-                Label::Case { case_id , value } => {
+                Label::Case { case_id, value } => {
                     let switch_id = self.get_innermost_switch_id()?;
                     let current_arms = self.arms.last_mut().unwrap();
                     let cnt = current_arms.len() + 1;
@@ -131,9 +129,7 @@ impl WalkerMut for LoopLabeler {
 
     fn leave_statement(&mut self, stmt: &mut Statement) -> Result<()> {
         match stmt {
-            Statement::While { .. }
-            | Statement::For { .. }
-            | Statement::DoWhile { .. } => {
+            Statement::While { .. } | Statement::For { .. } | Statement::DoWhile { .. } => {
                 self.target_ids.pop();
             }
             Statement::SwitchStatement { arms, .. } => {
@@ -157,7 +153,9 @@ enum TargetId {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ast::{Block, BlockItem, Expression, FunctionDefinition, Label, Program, Statement};
+    use crate::ast::{
+        Block, BlockItem, Expression, FunctionDeclaration, Label, Program, Statement,
+    };
     use crate::lexer::Lexer;
     use crate::parser::Parser;
 
@@ -205,7 +203,15 @@ mod tests {
             .label_loops(&mut program)
             .expect("Expected loop labeler to succeed");
 
-        match &program.function_definition.body.items[0] {
+        let body = program
+            .function_decls
+            .get(0)
+            .expect("Expected main function to be present")
+            .body
+            .as_ref()
+            .expect("Expected main function body to be present");
+
+        match &body.items[0] {
             BlockItem::Statement(Statement::While { loop_id, body, .. }) => {
                 assert_eq!(loop_id, "loop.0");
 
@@ -264,7 +270,15 @@ mod tests {
             .label_loops(&mut program)
             .expect("Expected loop labeler to succeed");
 
-        match &program.function_definition.body.items[0] {
+        let body = program
+            .function_decls
+            .get(0)
+            .expect("Expected main function to be present")
+            .body
+            .as_ref()
+            .expect("Expected main function body to be present");
+
+        match &body.items[0] {
             BlockItem::Statement(Statement::While { loop_id, body, .. }) => {
                 assert_eq!(loop_id, "loop.0");
 
@@ -358,7 +372,15 @@ mod tests {
             .label_loops(&mut program)
             .expect("Expected loop labeler to succeed");
 
-        match &program.function_definition.body.items[0] {
+        let body = program
+            .function_decls
+            .get(0)
+            .expect("Expected main function to be present")
+            .body
+            .as_ref()
+            .expect("Expected main function body to be present");
+
+        match &body.items[0] {
             BlockItem::Statement(Statement::SwitchStatement {
                 switch_id, body, ..
             }) => {
@@ -367,7 +389,10 @@ mod tests {
                 match body.as_ref() {
                     Statement::CompoundStatement(block) => {
                         match &block.items[0] {
-                            BlockItem::Statement(Statement::LabeledStatement { label, statement }) => {
+                            BlockItem::Statement(Statement::LabeledStatement {
+                                label,
+                                statement,
+                            }) => {
                                 match label {
                                     Label::Case { case_id, .. } => {
                                         assert_eq!(case_id, "switch.0.case.1")
@@ -395,7 +420,10 @@ mod tests {
                         }
 
                         match &block.items[2] {
-                            BlockItem::Statement(Statement::LabeledStatement { label, statement }) => {
+                            BlockItem::Statement(Statement::LabeledStatement {
+                                label,
+                                statement,
+                            }) => {
                                 match label {
                                     Label::Default { default_id } => {
                                         assert_eq!(default_id, "switch.0.default")
@@ -439,7 +467,9 @@ mod tests {
 
         let mut program = parse_code(code).expect("Expected code to parse");
         let mut labeler = LoopLabeler::new();
-        labeler.label_loops(&mut program).expect("Expected loop labeling to succeed");
+        labeler
+            .label_loops(&mut program)
+            .expect("Expected loop labeling to succeed");
     }
 
     #[test]
@@ -471,19 +501,18 @@ mod tests {
         parser.parse(tokens)
     }
 
-
     fn program_with_statement(statement: Statement) -> Program {
-        Program::new(FunctionDefinition::new(
+        let mut program = Program::new();
+        program.add_function_decl(FunctionDeclaration::new(
             "main".to_string(),
-            Block::new(vec![BlockItem::Statement(statement)]),
-        ))
+            vec![],
+            Some(Block::new(vec![BlockItem::Statement(statement)])),
+        ));
+        program
     }
 
     fn assert_outside_loop_error(result: Result<()>) {
         let err = result.expect_err("Expected loop labeler to reject statement outside loops");
-        assert!(
-            err.to_string()
-                .contains("not inside")
-        );
+        assert!(err.to_string().contains("not inside"));
     }
 }
