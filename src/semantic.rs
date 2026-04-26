@@ -5,7 +5,7 @@ mod walker;
 mod label_resolver;
 mod name_generator;
 mod scope;
-mod variable_resolver;
+mod identifier_resolver;
 mod loop_labeler;
 
 pub use label_resolver::LabelResolver;
@@ -13,7 +13,7 @@ pub use name_generator::{
     NameGeneratorRef, make_label_name_generator, make_temp_var_name_generator,
     make_var_name_generator,
 };
-pub use variable_resolver::VariableResolver;
+pub use identifier_resolver::IdentifierResolver;
 use crate::semantic::loop_labeler::LoopLabeler;
 
 pub fn validate(
@@ -21,7 +21,7 @@ pub fn validate(
     label_name_generator: &NameGeneratorRef,
     program: &mut Program,
 ) -> Result<()> {
-    let mut variable_resolver = VariableResolver::new(var_name_generator.clone());
+    let mut variable_resolver = IdentifierResolver::new(var_name_generator.clone());
     variable_resolver.resolve(program)?;
 
     let mut label_resolver = LabelResolver::new(label_name_generator.clone());

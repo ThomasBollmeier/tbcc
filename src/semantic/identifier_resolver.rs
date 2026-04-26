@@ -1,20 +1,25 @@
-use crate::ast::{Block, Declaration, Expression, Program, Statement};
+use crate::ast::{Block, Declaration, Expression, FunctionDeclaration, Program, Statement};
 use crate::semantic::name_generator::NameGeneratorRef;
-use crate::semantic::scope::{Scope, ScopeRef};
+use crate::semantic::scope::{ResolutionStrategy, Scope, ScopeRef};
 use crate::semantic::walker;
 use crate::semantic::walker::WalkerMut;
 use anyhow::{Result, anyhow};
+use std::rc::Rc;
 
-pub struct VariableResolver {
+pub struct IdentifierResolver {
     var_name_generator: NameGeneratorRef,
-    current_scope: ScopeRef,
+    current_scope: ScopeRef<IdentifierAdditional>,
+    function_nesting_level: usize,
+    block_nesting_levels: Vec<usize>,
 }
 
-impl VariableResolver {
+impl IdentifierResolver {
     pub fn new(var_name_generator: NameGeneratorRef) -> Self {
         Self {
             var_name_generator: var_name_generator.clone(),
-            current_scope: Scope::new_ref(None, var_name_generator),
+            current_scope: Scope::new_ref(None, var_name_generator, IdentifierStrategy::new_ref()),
+            function_nesting_level: 0,
+            block_nesting_levels: vec![],
         }
     }
 
@@ -23,9 +28,11 @@ impl VariableResolver {
     }
 
     fn open_scope(&mut self) {
+        let strategy = self.current_scope.borrow().strategy.clone();
         self.current_scope = Scope::new_ref(
             Some(self.current_scope.clone()),
             self.var_name_generator.clone(),
+            strategy,
         );
     }
 
@@ -35,19 +42,78 @@ impl VariableResolver {
     }
 }
 
-impl WalkerMut for VariableResolver {
-    fn enter_block(&mut self, _: &mut Block) -> Result<()> {
+impl WalkerMut for IdentifierResolver {
+    fn enter_func_decl(&mut self, func_decl: &mut FunctionDeclaration) -> Result<()> {
+        if func_decl.body.is_some() && self.function_nesting_level > 0 {
+            return Err(anyhow!("Nested function definitions are not allowed"));
+        }
+
+        let additional_data = IdentifierAdditional {
+            linkage: Linkage::External,
+            kind: IdentifierKind::Function {
+                is_definition: func_decl.body.is_some(),
+            },
+        };
+        let unique_name = self
+            .current_scope
+            .borrow_mut()
+            .add(&func_decl.name, additional_data)?;
+        func_decl.name = unique_name;
+
         self.open_scope();
+
+        for param in &mut func_decl.parameters {
+            let additional_data = IdentifierAdditional {
+                linkage: Linkage::None,
+                kind: IdentifierKind::Variable,
+            };
+            let unique_name = self
+                .current_scope
+                .borrow_mut()
+                .add(param, additional_data)?;
+            *param = unique_name;
+        }
+
+        self.function_nesting_level += 1;
+        self.block_nesting_levels.push(0);
+
         Ok(())
     }
 
-    fn leave_block(&mut self, _: &mut Block) -> Result<()> {
+    fn leave_func_decl(&mut self, _: &mut FunctionDeclaration) -> Result<()> {
+        self.function_nesting_level -= 1;
+        self.block_nesting_levels.pop();
         self.close_scope();
         Ok(())
     }
 
+    fn enter_block(&mut self, _: &mut Block) -> Result<()> {
+        if self.block_nesting_levels.last().unwrap() > &0 {
+            self.open_scope();
+        }
+        self.block_nesting_levels.last_mut().map(|level| *level += 1);
+
+        Ok(())
+    }
+
+    fn leave_block(&mut self, _: &mut Block) -> Result<()> {
+        self.block_nesting_levels.last_mut().map(|level| *level -= 1);
+        if self.block_nesting_levels.last().unwrap() > &0 {
+            self.close_scope();
+        }
+
+        Ok(())
+    }
+
     fn enter_declaration(&mut self, decl: &mut Declaration) -> Result<()> {
-        let unique_name = self.current_scope.borrow_mut().add(&decl.name)?;
+        let additional_data = IdentifierAdditional {
+            linkage: Linkage::None,
+            kind: IdentifierKind::Variable,
+        };
+        let unique_name = self
+            .current_scope
+            .borrow_mut()
+            .add(&decl.name, additional_data)?;
         decl.name = unique_name;
         Ok(())
     }
@@ -92,10 +158,89 @@ impl WalkerMut for VariableResolver {
                     return Err(anyhow!("Variable `{name}` is not defined"));
                 }
             }
+            FuncCall { name, args: _ } => {
+                if let Some(unique_name) = self.current_scope.borrow().get_unique_name(name) {
+                    *name = unique_name;
+                } else {
+                    return Err(anyhow!("Function `{name}` is not defined"));
+                }
+            }
             _ => {}
         }
 
         Ok(())
+    }
+}
+
+#[derive(Debug, Clone)]
+struct IdentifierAdditional {
+    linkage: Linkage,
+    kind: IdentifierKind,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+enum Linkage {
+    External,
+    None,
+}
+
+#[derive(Debug, Clone)]
+enum IdentifierKind {
+    Variable,
+    Function { is_definition: bool },
+}
+
+struct IdentifierStrategy;
+
+impl IdentifierStrategy {
+    fn new_ref() -> Rc<Self> {
+        Rc::new(Self)
+    }
+}
+
+impl ResolutionStrategy<IdentifierAdditional> for IdentifierStrategy {
+    fn check_add_name_to_scope(
+        &self,
+        name: &str,
+        existing_entry: &Option<IdentifierAdditional>,
+        exists_in_current_scope: bool,
+        new_additional_data: &IdentifierAdditional,
+    ) -> Result<()> {
+        if exists_in_current_scope {
+            let existing_data = existing_entry.as_ref().unwrap();
+            if existing_data.linkage != Linkage::External
+                || existing_data.linkage != new_additional_data.linkage
+            {
+                return Err(anyhow!("'{name}' already exists in current scope"));
+            }
+        }
+
+        match (existing_entry, new_additional_data) {
+            (Some(IdentifierAdditional { kind: IdentifierKind::Function { is_definition: true}, .. }),
+                IdentifierAdditional { kind: IdentifierKind::Function { is_definition: true}, .. }) => {
+                    return Err(anyhow!("Redefinition of function `{name}`"));
+                }
+            _ => {}
+        }
+
+        Ok(())
+    }
+
+    fn create_unique_name(
+        &self,
+        name: &str,
+        _: &Option<IdentifierAdditional>,
+        _: bool,
+        new_additional_data: &IdentifierAdditional,
+        name_generator: NameGeneratorRef,
+    ) -> Result<String> {
+        let unique_name = if new_additional_data.linkage == Linkage::None {
+            name_generator.borrow_mut().make_unique_name(name)
+        } else {
+            name.to_string()
+        };
+
+        Ok(unique_name)
     }
 }
 
@@ -245,6 +390,71 @@ mod tests {
         );
     }
 
+    #[test]
+    fn fails_on_duplicate_parameters_in_function_declaration() {
+        let result = resolve_code(
+            r#"
+            int foo(int a, int b, int a);
+            "#,
+        );
+
+        result.expect_err("Expected duplicate parameter error");
+    }
+
+    #[test]
+    fn fails_on_redefinition_of_parameters_in_body() {
+        let result = resolve_code(
+            r#"
+            int foo(int a) {
+                int a = 5;
+                return a;
+            }
+            "#,
+        );
+
+        result.expect_err("Expected duplicate parameter error");
+    }
+
+    #[test]
+    fn variable_shadows_function_ok() {
+        let result = resolve_code(
+            r#"
+            int main(void) {
+                int doit();
+                if (1) {
+                    int doit = 5;
+                    return doit;
+                }
+            }
+
+            int doit(void) {
+                return 42;
+            }
+            "#,
+        );
+
+        result.expect("Expected variable shadowing function to be allowed");
+    }
+
+    #[test]
+    fn parameter_shadows_var_ok() {
+        let result = resolve_code(
+            r#"
+            int main(void) {
+                int x = 5;
+                int foo(int x);
+                return foo(x);
+            }
+
+            int foo(int i) {
+                return i + 1;
+            }
+            "#,
+        );
+
+        result.expect("Expected parameter shadowing variable to be allowed");
+    }
+
     fn resolve_code(code: &str) -> Result<Program> {
         let lexer = Lexer::new();
         let parser = Parser::new();
@@ -252,7 +462,7 @@ mod tests {
         let mut program = parser.parse(tokens)?;
 
         let var_name_generator = make_var_name_generator();
-        let mut resolver = VariableResolver::new(var_name_generator);
+        let mut resolver = IdentifierResolver::new(var_name_generator);
         resolver.resolve(&mut program)?;
 
         Ok(program)

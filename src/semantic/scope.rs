@@ -1,29 +1,42 @@
 use crate::semantic::name_generator::NameGeneratorRef;
-use anyhow::{Result, anyhow};
+use anyhow::Result;
 use std::cell::RefCell;
-use std::collections::hash_map::Entry;
 use std::collections::HashMap;
+use std::collections::hash_map::Entry;
 use std::rc::Rc;
 
-pub struct Scope<T=NoAdditionalData> {
+pub struct Scope<T = NoAdditionalData>
+where
+    T: Clone,
+{
     parent: Option<ScopeRef<T>>,
     name_generator: NameGeneratorRef,
     names: HashMap<String, NamingData<T>>,
+    pub strategy: Rc<dyn ResolutionStrategy<T>>,
 }
 
-pub type ScopeRef<T=NoAdditionalData> = Rc<RefCell<Scope<T>>>;
+pub type ScopeRef<T = NoAdditionalData> = Rc<RefCell<Scope<T>>>;
 
-impl<'a, T: Default> Scope<T> {
-    pub fn new(parent: Option<ScopeRef<T>>, name_generator: NameGeneratorRef) -> Scope<T> {
+impl<'a, T: Clone> Scope<T> {
+    pub fn new(
+        parent: Option<ScopeRef<T>>,
+        name_generator: NameGeneratorRef,
+        strategy: Rc<dyn ResolutionStrategy<T>>,
+    ) -> Scope<T> {
         Scope {
             parent,
             name_generator,
             names: HashMap::new(),
+            strategy,
         }
     }
 
-    pub fn new_ref(parent: Option<ScopeRef<T>>, name_generator: NameGeneratorRef) -> ScopeRef<T> {
-        Rc::new(RefCell::new(Scope::new(parent, name_generator)))
+    pub fn new_ref(
+        parent: Option<ScopeRef<T>>,
+        name_generator: NameGeneratorRef,
+        strategy: Rc<dyn ResolutionStrategy<T>>,
+    ) -> ScopeRef<T> {
+        Rc::new(RefCell::new(Scope::new(parent, name_generator, strategy)))
     }
 
     pub fn get_parent(&self) -> Option<ScopeRef<T>> {
@@ -41,12 +54,25 @@ impl<'a, T: Default> Scope<T> {
         }
     }
 
-    pub fn get_names_in_current_scope(&self) -> Vec<String> {
-        self.names.keys().cloned().collect()
+    fn get_naming_data(&self, name: &str) -> (Option<T>, bool) {
+        if let Some(naming) = self.names.get(name) {
+            return (Some(naming.clone().additional), true);
+        }
+
+        let mut scope = self.parent.clone();
+        while let Some(current_scope) = scope {
+            let current_scope = current_scope.borrow();
+            if let Some(naming) = current_scope.names.get(name) {
+                return (Some(naming.clone().additional), false);
+            }
+            scope = current_scope.parent.clone();
+        }
+
+        (None, false)
     }
 
-    pub fn is_in_current_scope(&self, name: &str) -> bool {
-        self.names.contains_key(name)
+    pub fn get_names_in_current_scope(&self) -> Vec<String> {
+        self.names.keys().cloned().collect()
     }
 
     pub fn get_current_info_mut(&mut self, name: &str) -> Entry<'_, String, NamingData<T>> {
@@ -57,32 +83,59 @@ impl<'a, T: Default> Scope<T> {
         self.names.get(name)
     }
 
-    pub fn add_full(&mut self, name: &str, additional_data: T) -> Result<String> {
-        if self.is_in_current_scope(name) {
-            return Err(anyhow!("'{name}' already exists in current scope"));
-        }
+    pub fn add(&mut self, name: &str, additional_data: T) -> Result<String> {
+        let (existing_data_opt, exists_in_current_scope) = self.get_naming_data(name);
 
-        let unique_name = self.name_generator.borrow_mut().make_unique_name(name);
-        self.names.insert(
-            name.to_string(),
-            NamingData {
-                unique_name: unique_name.clone(),
-                additional: additional_data,
-            },
-        );
+        self.strategy.check_add_name_to_scope(
+            name,
+            &existing_data_opt,
+            exists_in_current_scope,
+            &additional_data,
+        )?;
+
+        let unique_name = self.strategy.create_unique_name(
+            name,
+            &existing_data_opt,
+            exists_in_current_scope,
+            &additional_data,
+            self.name_generator.clone(),
+        )?;
+
+        let new_entry = NamingData {
+            unique_name: unique_name.clone(),
+            additional: additional_data,
+        };
+
+        self.names.insert(name.to_string(), new_entry);
 
         Ok(unique_name)
     }
-
-    pub fn add(&mut self, name: &str) -> Result<String> {
-        self.add_full(name, T::default())
-    }
 }
 
-pub struct NamingData<T> {
+#[derive(Clone)]
+pub struct NamingData<T: Clone> {
     pub unique_name: String,
     pub additional: T,
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 pub struct NoAdditionalData;
+
+pub trait ResolutionStrategy<T: Clone> {
+    fn check_add_name_to_scope(
+        &self,
+        name: &str,
+        existing_entry: &Option<T>,
+        exists_in_current_scope: bool,
+        new_additional_data: &T,
+    ) -> Result<()>;
+
+    fn create_unique_name(
+        &self,
+        name: &str,
+        existing_entry: &Option<T>,
+        exists_in_current_scope: bool,
+        new_additional_data: &T,
+        name_generator: NameGeneratorRef,
+    ) -> Result<String>;
+}

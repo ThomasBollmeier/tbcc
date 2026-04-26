@@ -10,10 +10,10 @@ pub trait WalkerMut {
         Ok(())
     }
 
-    fn enter_func_def(&mut self, func_def: &mut FunctionDeclaration) -> Result<()> {
+    fn enter_func_decl(&mut self, func_decl: &mut FunctionDeclaration) -> Result<()> {
         Ok(())
     }
-    fn leave_func_def(&mut self, func_def: &mut FunctionDeclaration) -> Result<()> {
+    fn leave_func_decl(&mut self, func_decl: &mut FunctionDeclaration) -> Result<()> {
         Ok(())
     }
 
@@ -56,11 +56,11 @@ pub fn walk(program: &mut Program, walker: &mut impl WalkerMut) -> Result<()> {
 }
 
 fn walk_function_decl(func_decl: &mut FunctionDeclaration, walker: &mut impl WalkerMut) -> Result<()> {
-    walker.enter_func_def(func_decl)?;
+    walker.enter_func_decl(func_decl)?;
     if let Some(body) = &mut func_decl.body {
         walk_block(body, walker)?;
     }
-    walker.leave_func_def(func_decl)?;
+    walker.leave_func_decl(func_decl)?;
     Ok(())
 }
 

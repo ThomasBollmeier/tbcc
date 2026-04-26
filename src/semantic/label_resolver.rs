@@ -1,9 +1,10 @@
 use crate::ast::{FunctionDeclaration, Label, Program, Statement};
 use crate::semantic::name_generator::NameGeneratorRef;
-use crate::semantic::scope::{NamingData, Scope, ScopeRef};
+use crate::semantic::scope::{NamingData, ResolutionStrategy, Scope, ScopeRef};
 use crate::semantic::walker;
 use crate::semantic::walker::WalkerMut;
 use anyhow::{Result, anyhow};
+use std::rc::Rc;
 
 pub struct LabelResolver {
     label_name_generator: NameGeneratorRef,
@@ -92,17 +93,10 @@ impl LabelResolver {
                 *label = Label::Label(unique_name);
             }
             None => {
-                let unique_name = self
-                    .label_name_generator
-                    .borrow_mut()
-                    .make_unique_name(label_name);
                 let current_scope = self.current_scope.as_mut().unwrap();
                 let mut current_scope = current_scope.borrow_mut();
-                let entry = current_scope.get_current_info_mut(label_name);
-                entry.or_insert(NamingData {
-                    unique_name: unique_name.clone(),
-                    additional: LabelAdditionalData { is_declared: true },
-                });
+                let unique_name =
+                    current_scope.add(label_name, LabelAdditionalData { is_declared: true })?;
                 *label = Label::Label(unique_name);
             }
         }
@@ -131,14 +125,22 @@ impl LabelResolver {
 }
 
 impl WalkerMut for LabelResolver {
-    fn enter_func_def(&mut self, _: &mut FunctionDeclaration) -> Result<()> {
-        self.current_scope = Some(Scope::new_ref(None, self.label_name_generator.clone()));
+    fn enter_func_decl(&mut self, func_decl: &mut FunctionDeclaration) -> Result<()> {
+        if func_decl.body.is_some() {
+            self.current_scope = Some(Scope::new_ref(
+                None,
+                self.label_name_generator.clone(),
+                LabelStrategy::new_ref(),
+            ));
+        }
         Ok(())
     }
 
-    fn leave_func_def(&mut self, _: &mut FunctionDeclaration) -> Result<()> {
-        self.check_for_undeclared_labels()?;
-        self.current_scope = None;
+    fn leave_func_decl(&mut self, func_decl: &mut FunctionDeclaration) -> Result<()> {
+        if func_decl.body.is_some() {
+            self.check_for_undeclared_labels()?;
+            self.current_scope = None;
+        }
         Ok(())
     }
 
@@ -152,9 +154,44 @@ impl WalkerMut for LabelResolver {
     }
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 struct LabelAdditionalData {
     is_declared: bool,
+}
+
+struct LabelStrategy;
+
+impl LabelStrategy {
+    pub fn new_ref() -> Rc<Self> {
+        Rc::new(LabelStrategy)
+    }
+}
+
+impl ResolutionStrategy<LabelAdditionalData> for LabelStrategy {
+    fn check_add_name_to_scope(
+        &self,
+        name: &str,
+        _existing_entry: &Option<LabelAdditionalData>,
+        exists_in_current_scope: bool,
+        _new_additional_data: &LabelAdditionalData,
+    ) -> Result<()> {
+        if exists_in_current_scope {
+            return Err(anyhow!("'{name}' already exists in current scope"));
+        }
+        Ok(())
+    }
+
+    fn create_unique_name(
+        &self,
+        name: &str,
+        _existing_entry: &Option<LabelAdditionalData>,
+        _exists_in_current_scope: bool,
+        _new_additional_data: &LabelAdditionalData,
+        name_generator: NameGeneratorRef,
+    ) -> Result<String> {
+        let unique_name = name_generator.borrow_mut().make_unique_name(name);
+        Ok(unique_name)
+    }
 }
 
 #[cfg(test)]
@@ -163,7 +200,8 @@ mod tests {
     use crate::ast::{BlockItem, Expression, Statement};
     use crate::lexer::Lexer;
     use crate::parser::Parser;
-    use crate::semantic::name_generator::make_label_name_generator;
+    use crate::semantic::IdentifierResolver;
+    use crate::semantic::name_generator;
 
     #[test]
     fn resolves_label_used_after_if_branch_declaration() {
@@ -231,13 +269,34 @@ mod tests {
         }
     }
 
+    #[test]
+    fn resolves_func_decls_wo_labels() {
+        resolve_code(
+            r#"
+        int main(void) {
+            int x = 41;
+            int inc(int x);
+            return inc(x);
+        }
+        int inc(int i) {
+            return i + 1;
+        }
+        "#,
+        )
+        .expect("Expected label resolver to succeed for function declarations without labels");
+    }
+
     fn resolve_code(code: &str) -> Result<Program> {
         let lexer = Lexer::new();
         let parser = Parser::new();
         let tokens = lexer.scan_tokens(code)?;
         let mut program = parser.parse(tokens)?;
 
-        let label_name_generator = make_label_name_generator();
+        let var_name_generator = name_generator::make_var_name_generator();
+        let mut variable_resolver = IdentifierResolver::new(var_name_generator.clone());
+        variable_resolver.resolve(&mut program)?;
+
+        let label_name_generator = name_generator::make_label_name_generator();
         let mut resolver = LabelResolver::new(label_name_generator);
         resolver.resolve(&mut program)?;
 
