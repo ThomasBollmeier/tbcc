@@ -50,9 +50,6 @@ impl WalkerMut for IdentifierResolver {
 
         let additional_data = IdentifierAdditional {
             linkage: Linkage::External,
-            kind: IdentifierKind::Function {
-                is_definition: func_decl.body.is_some(),
-            },
         };
         let unique_name = self
             .current_scope
@@ -65,7 +62,6 @@ impl WalkerMut for IdentifierResolver {
         for param in &mut func_decl.parameters {
             let additional_data = IdentifierAdditional {
                 linkage: Linkage::None,
-                kind: IdentifierKind::Variable,
             };
             let unique_name = self
                 .current_scope
@@ -108,7 +104,6 @@ impl WalkerMut for IdentifierResolver {
     fn enter_declaration(&mut self, decl: &mut Declaration) -> Result<()> {
         let additional_data = IdentifierAdditional {
             linkage: Linkage::None,
-            kind: IdentifierKind::Variable,
         };
         let unique_name = self
             .current_scope
@@ -175,19 +170,12 @@ impl WalkerMut for IdentifierResolver {
 #[derive(Debug, Clone)]
 struct IdentifierAdditional {
     linkage: Linkage,
-    kind: IdentifierKind,
 }
 
 #[derive(Debug, Clone, PartialEq)]
 enum Linkage {
     External,
     None,
-}
-
-#[derive(Debug, Clone)]
-enum IdentifierKind {
-    Variable,
-    Function { is_definition: bool },
 }
 
 struct IdentifierStrategy;
@@ -215,14 +203,14 @@ impl ResolutionStrategy<IdentifierAdditional> for IdentifierStrategy {
             }
         }
 
-        match (existing_entry, new_additional_data) {
+/*        match (existing_entry, new_additional_data) {
             (Some(IdentifierAdditional { kind: IdentifierKind::Function { is_definition: true}, .. }),
                 IdentifierAdditional { kind: IdentifierKind::Function { is_definition: true}, .. }) => {
                     return Err(anyhow!("Redefinition of function `{name}`"));
                 }
             _ => {}
         }
-
+*/
         Ok(())
     }
 

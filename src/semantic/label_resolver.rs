@@ -1,6 +1,6 @@
 use crate::ast::{FunctionDeclaration, Label, Program, Statement};
 use crate::semantic::name_generator::NameGeneratorRef;
-use crate::semantic::scope::{NamingData, ResolutionStrategy, Scope, ScopeRef};
+use crate::semantic::scope::{ResolutionStrategy, Scope, ScopeRef};
 use crate::semantic::walker;
 use crate::semantic::walker::WalkerMut;
 use anyhow::{Result, anyhow};
@@ -108,16 +108,11 @@ impl LabelResolver {
             *label = unique_name;
         } else {
             let unique_name = self
-                .label_name_generator
+                .current_scope
+                .as_ref()
+                .expect("Labels cannot be used outside of a function")
                 .borrow_mut()
-                .make_unique_name(label);
-            let current_scope = self.current_scope.as_mut().unwrap();
-            let mut current_scope = current_scope.borrow_mut();
-            let entry = current_scope.get_current_info_mut(label);
-            entry.or_insert(NamingData {
-                unique_name: unique_name.clone(),
-                additional: LabelAdditionalData { is_declared: false },
-            });
+                .add(label, LabelAdditionalData { is_declared: false })?;
             *label = unique_name;
         }
         Ok(())

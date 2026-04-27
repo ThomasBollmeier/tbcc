@@ -7,6 +7,8 @@ mod name_generator;
 mod scope;
 mod identifier_resolver;
 mod loop_labeler;
+pub mod symbol_table;
+mod type_checker;
 
 pub use label_resolver::LabelResolver;
 pub use name_generator::{
@@ -23,6 +25,9 @@ pub fn validate(
 ) -> Result<()> {
     let mut variable_resolver = IdentifierResolver::new(var_name_generator.clone());
     variable_resolver.resolve(program)?;
+    
+    let mut type_checker = type_checker::TypeChecker::new();
+    type_checker.check(program)?;
 
     let mut label_resolver = LabelResolver::new(label_name_generator.clone());
     label_resolver.resolve(program)?;
