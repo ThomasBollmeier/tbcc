@@ -30,6 +30,7 @@ impl TackyEmitter {
         let functions = program
             .function_decls
             .iter()
+            .filter(|func_decl| func_decl.body.is_some()) // Skip main function for now
             .map(|func_decl| self.emit_function_decl(func_decl))
             .collect::<Vec<Function>>();
 
@@ -48,6 +49,7 @@ impl TackyEmitter {
 
         Function {
             name,
+            parameters: function_declaration.parameters.clone(),
             body: instructions,
         }
     }
@@ -364,162 +366,242 @@ impl TackyEmitter {
 
     fn emit_expression(&mut self, expr: &Expression, instructions: &mut Vec<Instruction>) -> Value {
         match expr {
-            Expression::IntegerConstant(value) => IntegerConstant(*value),
-            Expression::UnaryExpr(op, expr) => {
-                let op = self.unary_op(op);
-                let src = self.emit_expression(expr, instructions);
-                let dst = Value::Variable(self.make_temp_var());
-                instructions.push(Unary {
-                    op,
-                    src,
-                    dst: dst.clone(),
-                });
-                dst
-            }
+            Expression::IntegerConstant(value) => self.emit_integer_constant(*value),
+            Expression::UnaryExpr(op, expr) => self.emit_unary_expr(op, expr, instructions),
             Expression::BinaryExpr(BinaryOp::LogicalAnd, left, right) => {
-                let end_label = self.make_label("and_end");
-                let false_label = self.make_label("and_false");
-                let result = Value::Variable(self.make_temp_var());
-
-                let val1 = self.emit_expression(left, instructions);
-                instructions.push(Instruction::JumpIfZero {
-                    condition: val1.clone(),
-                    target: false_label.clone(),
-                });
-
-                let val2 = self.emit_expression(right, instructions);
-                instructions.push(Instruction::JumpIfZero {
-                    condition: val2.clone(),
-                    target: false_label.clone(),
-                });
-
-                instructions.push(Instruction::Copy {
-                    src: IntegerConstant(1),
-                    dst: result.clone(),
-                });
-                instructions.push(Instruction::Jump {
-                    target: end_label.clone(),
-                });
-
-                instructions.push(Instruction::Label(false_label));
-                instructions.push(Instruction::Copy {
-                    src: IntegerConstant(0),
-                    dst: result.clone(),
-                });
-
-                instructions.push(Instruction::Label(end_label));
-
-                result
+                self.emit_logical_and_expr(left, right, instructions)
             }
             Expression::BinaryExpr(BinaryOp::LogicalOr, left, right) => {
-                let end_label = self.make_label("or_end");
-                let true_label = self.make_label("or_true");
-                let result = Value::Variable(self.make_temp_var());
-
-                let val1 = self.emit_expression(left, instructions);
-                instructions.push(Instruction::JumpIfNotZero {
-                    condition: val1.clone(),
-                    target: true_label.clone(),
-                });
-
-                let val2 = self.emit_expression(right, instructions);
-                instructions.push(Instruction::JumpIfNotZero {
-                    condition: val2.clone(),
-                    target: true_label.clone(),
-                });
-
-                instructions.push(Instruction::Copy {
-                    src: IntegerConstant(0),
-                    dst: result.clone(),
-                });
-                instructions.push(Instruction::Jump {
-                    target: end_label.clone(),
-                });
-
-                instructions.push(Instruction::Label(true_label));
-                instructions.push(Instruction::Copy {
-                    src: IntegerConstant(1),
-                    dst: result.clone(),
-                });
-
-                instructions.push(Instruction::Label(end_label));
-
-                result
+                self.emit_logical_or_expr(left, right, instructions)
             }
             Expression::BinaryExpr(op, left, right) => {
-                let src1 = self.emit_expression(left, instructions);
-                let src2 = self.emit_expression(right, instructions);
-                let dst = Value::Variable(self.make_temp_var());
-                let op = self.binary_op(op);
-                instructions.push(Instruction::Binary {
-                    op,
-                    src1,
-                    src2,
-                    dst: dst.clone(),
-                });
-                dst
+                self.emit_binary_expr(op, left, right, instructions)
             }
             Expression::Assignment {
                 left,
                 right,
                 is_postfix,
-            } => {
-                let src = self.emit_expression(right, instructions);
-                let dst = self.emit_expression(left, instructions);
-                if !is_postfix {
-                    instructions.push(Instruction::Copy {
-                        src,
-                        dst: dst.clone(),
-                    });
-                    dst
-                } else {
-                    let original_value = Value::Variable(self.make_temp_var());
-                    instructions.push(Instruction::Copy {
-                        src: dst.clone(),
-                        dst: original_value.clone(),
-                    });
-                    instructions.push(Instruction::Copy { src, dst });
-                    original_value
-                }
-            }
-            Expression::Var(name) => Value::Variable(name.clone()),
+            } => self.emit_assignment_expr(left, right, *is_postfix, instructions),
+            Expression::Var(name) => self.emit_var_expr(name),
             Expression::ConditionalExpr {
                 condition,
                 then_expr,
                 else_expr,
-            } => {
-                let end_label = self.make_label("cond_end");
-                let else_label = self.make_label("cond_else");
-                let result = Value::Variable(self.make_temp_var());
-
-                let condition_value = self.emit_expression(condition, instructions);
-                instructions.push(Instruction::JumpIfZero {
-                    condition: condition_value,
-                    target: else_label.clone(),
-                });
-
-                let then_value = self.emit_expression(then_expr, instructions);
-                instructions.push(Instruction::Copy {
-                    src: then_value,
-                    dst: result.clone(),
-                });
-                instructions.push(Instruction::Jump {
-                    target: end_label.clone(),
-                });
-
-                instructions.push(Instruction::Label(else_label));
-                let else_value = self.emit_expression(else_expr, instructions);
-                instructions.push(Instruction::Copy {
-                    src: else_value,
-                    dst: result.clone(),
-                });
-
-                instructions.push(Instruction::Label(end_label));
-
-                result
+            } => self.emit_conditional_expr(condition, then_expr, else_expr, instructions),
+            Expression::FuncCall { name, args } => {
+                self.emit_func_call_expr(name, args, instructions)
             }
-            _ => unimplemented!(),
         }
+    }
+
+    fn emit_integer_constant(&self, value: i32) -> Value {
+        IntegerConstant(value)
+    }
+
+    fn emit_var_expr(&self, name: &str) -> Value {
+        Value::Variable(name.to_string())
+    }
+
+    fn emit_unary_expr(
+        &mut self,
+        op: &UnaryOp,
+        expr: &Expression,
+        instructions: &mut Vec<Instruction>,
+    ) -> Value {
+        let op = self.unary_op(op);
+        let src = self.emit_expression(expr, instructions);
+        let dst = Value::Variable(self.make_temp_var());
+        instructions.push(Unary {
+            op,
+            src,
+            dst: dst.clone(),
+        });
+        dst
+    }
+
+    fn emit_logical_and_expr(
+        &mut self,
+        left: &Expression,
+        right: &Expression,
+        instructions: &mut Vec<Instruction>,
+    ) -> Value {
+        let end_label = self.make_label("and_end");
+        let false_label = self.make_label("and_false");
+        let result = Value::Variable(self.make_temp_var());
+
+        let val1 = self.emit_expression(left, instructions);
+        instructions.push(Instruction::JumpIfZero {
+            condition: val1,
+            target: false_label.clone(),
+        });
+
+        let val2 = self.emit_expression(right, instructions);
+        instructions.push(Instruction::JumpIfZero {
+            condition: val2,
+            target: false_label.clone(),
+        });
+
+        instructions.push(Instruction::Copy {
+            src: IntegerConstant(1),
+            dst: result.clone(),
+        });
+        instructions.push(Instruction::Jump {
+            target: end_label.clone(),
+        });
+
+        instructions.push(Instruction::Label(false_label));
+        instructions.push(Instruction::Copy {
+            src: IntegerConstant(0),
+            dst: result.clone(),
+        });
+        instructions.push(Instruction::Label(end_label));
+
+        result
+    }
+
+    fn emit_logical_or_expr(
+        &mut self,
+        left: &Expression,
+        right: &Expression,
+        instructions: &mut Vec<Instruction>,
+    ) -> Value {
+        let end_label = self.make_label("or_end");
+        let true_label = self.make_label("or_true");
+        let result = Value::Variable(self.make_temp_var());
+
+        let val1 = self.emit_expression(left, instructions);
+        instructions.push(Instruction::JumpIfNotZero {
+            condition: val1,
+            target: true_label.clone(),
+        });
+
+        let val2 = self.emit_expression(right, instructions);
+        instructions.push(Instruction::JumpIfNotZero {
+            condition: val2,
+            target: true_label.clone(),
+        });
+
+        instructions.push(Instruction::Copy {
+            src: IntegerConstant(0),
+            dst: result.clone(),
+        });
+        instructions.push(Instruction::Jump {
+            target: end_label.clone(),
+        });
+
+        instructions.push(Instruction::Label(true_label));
+        instructions.push(Instruction::Copy {
+            src: IntegerConstant(1),
+            dst: result.clone(),
+        });
+        instructions.push(Instruction::Label(end_label));
+
+        result
+    }
+
+    fn emit_binary_expr(
+        &mut self,
+        op: &BinaryOp,
+        left: &Expression,
+        right: &Expression,
+        instructions: &mut Vec<Instruction>,
+    ) -> Value {
+        let src1 = self.emit_expression(left, instructions);
+        let src2 = self.emit_expression(right, instructions);
+        let dst = Value::Variable(self.make_temp_var());
+        let op = self.binary_op(op);
+        instructions.push(Instruction::Binary {
+            op,
+            src1,
+            src2,
+            dst: dst.clone(),
+        });
+        dst
+    }
+
+    fn emit_assignment_expr(
+        &mut self,
+        left: &Expression,
+        right: &Expression,
+        is_postfix: bool,
+        instructions: &mut Vec<Instruction>,
+    ) -> Value {
+        let src = self.emit_expression(right, instructions);
+        let dst = self.emit_expression(left, instructions);
+        if !is_postfix {
+            instructions.push(Instruction::Copy {
+                src,
+                dst: dst.clone(),
+            });
+            dst
+        } else {
+            let original_value = Value::Variable(self.make_temp_var());
+            instructions.push(Instruction::Copy {
+                src: dst.clone(),
+                dst: original_value.clone(),
+            });
+            instructions.push(Instruction::Copy { src, dst });
+            original_value
+        }
+    }
+
+    fn emit_conditional_expr(
+        &mut self,
+        condition: &Expression,
+        then_expr: &Expression,
+        else_expr: &Expression,
+        instructions: &mut Vec<Instruction>,
+    ) -> Value {
+        let end_label = self.make_label("cond_end");
+        let else_label = self.make_label("cond_else");
+        let result = Value::Variable(self.make_temp_var());
+
+        let condition_value = self.emit_expression(condition, instructions);
+        instructions.push(Instruction::JumpIfZero {
+            condition: condition_value,
+            target: else_label.clone(),
+        });
+
+        let then_value = self.emit_expression(then_expr, instructions);
+        instructions.push(Instruction::Copy {
+            src: then_value,
+            dst: result.clone(),
+        });
+        instructions.push(Instruction::Jump {
+            target: end_label.clone(),
+        });
+
+        instructions.push(Instruction::Label(else_label));
+        let else_value = self.emit_expression(else_expr, instructions);
+        instructions.push(Instruction::Copy {
+            src: else_value,
+            dst: result.clone(),
+        });
+        instructions.push(Instruction::Label(end_label));
+
+        result
+    }
+
+    fn emit_func_call_expr(
+        &mut self,
+        name: &str,
+        args: &Vec<Expression>,
+        instructions: &mut Vec<Instruction>,
+    ) -> Value {
+        let arguments: Vec<Value> = args
+            .iter()
+            .map(|arg| self.emit_expression(arg, instructions))
+            .collect();
+
+        let dst = Value::Variable(self.make_temp_var());
+
+        instructions.push(Instruction::FunctionCall {
+            name: name.to_string(),
+            arguments,
+            dst: dst.clone(),
+        });
+
+        dst
     }
 
     fn unary_op(&mut self, op: &UnaryOp) -> UnaryOperator {
@@ -1175,6 +1257,74 @@ mod tests {
                 target: "start.loop.1".to_string(),
             },
             Label("break.loop.1".to_string()),
+        ];
+
+        let actual = emitter.emit_statement(&stmt);
+        assert_eq!(expected, actual);
+    }
+
+    #[test]
+    fn emit_func_call_no_args() {
+        use Instruction::*;
+        use Value::*;
+
+        let mut emitter = make_emitter();
+        let stmt = Statement::Return(Expression::FuncCall {
+            name: "foo".to_string(),
+            args: vec![],
+        });
+
+        let expected = vec![
+            FunctionCall {
+                name: "foo".to_string(),
+                arguments: vec![],
+                dst: Variable("tmp.0".to_string()),
+            },
+            Return(Variable("tmp.0".to_string())),
+        ];
+
+        let actual = emitter.emit_statement(&stmt);
+        assert_eq!(expected, actual);
+    }
+
+    #[test]
+    fn emit_func_call_with_args() {
+        use BinaryOperator::*;
+        use Instruction::*;
+        use Value::*;
+
+        let mut emitter = make_emitter();
+        // bar(1, 2 + 3)
+        let stmt = Statement::Return(Expression::FuncCall {
+            name: "bar".to_string(),
+            args: vec![
+                Expression::IntegerConstant(1),
+                Expression::BinaryExpr(
+                    BinaryOp::Add,
+                    Box::new(Expression::IntegerConstant(2)),
+                    Box::new(Expression::IntegerConstant(3)),
+                ),
+            ],
+        });
+
+        let expected = vec![
+            // evaluate 2 + 3 first
+            Binary {
+                op: Add,
+                src1: IntegerConstant(2),
+                src2: IntegerConstant(3),
+                dst: Variable("tmp.0".to_string()),
+            },
+            // function call with evaluated args
+            FunctionCall {
+                name: "bar".to_string(),
+                arguments: vec![
+                    IntegerConstant(1),
+                    Variable("tmp.0".to_string()),
+                ],
+                dst: Variable("tmp.1".to_string()),
+            },
+            Return(Variable("tmp.1".to_string())),
         ];
 
         let actual = emitter.emit_statement(&stmt);

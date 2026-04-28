@@ -203,14 +203,6 @@ impl ResolutionStrategy<IdentifierAdditional> for IdentifierStrategy {
             }
         }
 
-/*        match (existing_entry, new_additional_data) {
-            (Some(IdentifierAdditional { kind: IdentifierKind::Function { is_definition: true}, .. }),
-                IdentifierAdditional { kind: IdentifierKind::Function { is_definition: true}, .. }) => {
-                    return Err(anyhow!("Redefinition of function `{name}`"));
-                }
-            _ => {}
-        }
-*/
         Ok(())
     }
 

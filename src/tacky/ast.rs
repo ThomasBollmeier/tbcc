@@ -6,6 +6,7 @@ pub struct Program {
 #[derive(Debug, Clone, PartialEq)]
 pub struct Function {
     pub name: String,
+    pub parameters: Vec<String>,
     pub body: Vec<Instruction>,
 }
 
@@ -39,6 +40,11 @@ pub enum Instruction {
         target: String,
     },
     Label(String),
+    FunctionCall {
+        name: String,
+        arguments: Vec<Value>,
+        dst: Value,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq)]

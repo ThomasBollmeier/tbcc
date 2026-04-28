@@ -75,6 +75,11 @@ impl AssemblyCreator {
                 }
                 TackyInstruction::Copy { src, dst } => self.push_copy(&mut ret, src, dst),
                 TackyInstruction::Label(name) => self.push_label(&mut ret, name),
+                TackyInstruction::FunctionCall {
+                    name: _,
+                    arguments: _,
+                    dst: _,
+                } => unimplemented!("function call is not supported yet"),
             }
         }
 
@@ -402,6 +407,7 @@ mod tests {
         let tacky_program = TackyProgram {
             functions: vec![TackyFunctionDef {
                 name: "main".to_string(),
+                parameters: vec![],
                 body: vec![
                     TackyInstruction::Binary {
                         op: BinaryOperator::Add,
