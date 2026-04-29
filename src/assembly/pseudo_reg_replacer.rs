@@ -36,7 +36,13 @@ impl VisitorMut for PseudoRegReplacer {
     }
 
     fn exit_func_def(&mut self, func_def: &mut FuncDef) {
-        func_def.stack_frame_size = self.last_offset.abs() as usize;
+        let mut stack_frame_size = self.last_offset.abs() as usize;
+        // Align stack frame size to 16 bytes
+        if stack_frame_size % 16 != 0 {
+            stack_frame_size += 16 - (stack_frame_size % 16);
+        }
+
+        func_def.stack_frame_size = stack_frame_size;
     }
 
     fn visit_instruction(&mut self, instruction: &mut Instruction) {
