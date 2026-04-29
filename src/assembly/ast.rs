@@ -1,5 +1,5 @@
 #[derive(Debug)]
-pub struct Program{
+pub struct Program {
     pub functions: Vec<FuncDef>,
 }
 
@@ -57,20 +57,38 @@ impl Program {
 pub struct FuncDef {
     pub name: String,
     pub instructions: Vec<Instruction>,
+    pub stack_frame_size: usize,
 }
 
 impl FuncDef {
     pub fn new(name: String, instructions: Vec<Instruction>) -> Self {
-        Self { name, instructions }
+        Self {
+            name,
+            instructions,
+            stack_frame_size: 0, // filled by pseudo_reg_replacer
+        }
     }
 }
 
 #[derive(Debug, Clone)]
 pub enum Instruction {
-    Mov { src: Operand, dst: Operand },
-    Unary { op: UnaryOp, operand: Operand },
-    Binary { op: BinaryOp, left: Operand, right: Operand },
-    Cmp { op1: Operand, op2: Operand },
+    Mov {
+        src: Operand,
+        dst: Operand,
+    },
+    Unary {
+        op: UnaryOp,
+        operand: Operand,
+    },
+    Binary {
+        op: BinaryOp,
+        left: Operand,
+        right: Operand,
+    },
+    Cmp {
+        op1: Operand,
+        op2: Operand,
+    },
     Idiv(Operand),
     Cdq,
     Jmp(String),
@@ -78,6 +96,9 @@ pub enum Instruction {
     SetCC(ConditionCode, Operand),
     Label(String),
     AllocateStack(i32),
+    DeAllocateStack(i32),
+    Push(Operand),
+    Call(String),
     Ret,
 }
 
@@ -122,6 +143,10 @@ pub enum Register {
     AX,
     CX,
     DX,
+    DI,
+    SI,
+    R8,
+    R9,
     R10,
     R11,
 }

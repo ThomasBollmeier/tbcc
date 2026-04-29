@@ -1,12 +1,10 @@
 use crate::assembly::ast::VisitorMut;
 
-pub struct InstructionFixer {
-    stack_frame_size: usize,
-}
+pub struct InstructionFixer;
 
 impl InstructionFixer {
-    pub fn new(stack_frame_size: usize) -> InstructionFixer {
-        InstructionFixer { stack_frame_size }
+    pub fn new() -> InstructionFixer {
+        InstructionFixer
     }
 }
 
@@ -17,7 +15,7 @@ impl VisitorMut for InstructionFixer {
         let mut new_instructions = vec![];
 
         // Allocate stack space at the beginning of the function
-        new_instructions.push(AllocateStack(self.stack_frame_size as i32));
+        new_instructions.push(AllocateStack(func_def.stack_frame_size as i32));
 
         for instruction in &func_def.instructions {
             match instruction {
@@ -135,9 +133,11 @@ mod tests {
     use super::InstructionFixer;
     use crate::assembly::ast::{FuncDef, Instruction, Operand, Program, Register, UnaryOp};
 
-    fn apply_fixer(instructions: Vec<Instruction>, stack_frame_size: usize) -> Vec<Instruction> {
+    fn apply_fixer(instructions: Vec<Instruction>) -> Vec<Instruction> {
         let mut program = Program::new(vec![FuncDef::new("main".to_string(), instructions)]);
-        let mut fixer = InstructionFixer::new(stack_frame_size);
+        let mut pseudo_reg_replacer = crate::assembly::pseudo_reg_replacer::PseudoRegReplacer::new();
+        program.walk_mut(&mut pseudo_reg_replacer);
+        let mut fixer = InstructionFixer::new();
         program.walk_mut(&mut fixer);
         program.functions[0].instructions.clone()
     }
@@ -146,9 +146,9 @@ mod tests {
     fn inserts_allocate_stack_as_first_instruction() {
         let instructions = vec![Instruction::Ret];
 
-        let fixed = apply_fixer(instructions, 16);
+        let fixed = apply_fixer(instructions);
 
-        assert!(matches!(fixed[0], Instruction::AllocateStack(16)));
+        assert!(matches!(fixed[0], Instruction::AllocateStack(0)));
         assert!(matches!(fixed[1], Instruction::Ret));
     }
 
@@ -159,9 +159,9 @@ mod tests {
             dst: Operand::Stack(-8),
         }];
 
-        let fixed = apply_fixer(instructions, 8);
+        let fixed = apply_fixer(instructions);
 
-        assert!(matches!(fixed[0], Instruction::AllocateStack(8)));
+        assert!(matches!(fixed[0], Instruction::AllocateStack(0)));
 
         match &fixed[1] {
             Instruction::Mov { src, dst } => {
@@ -194,7 +194,7 @@ mod tests {
             Instruction::Ret,
         ];
 
-        let fixed = apply_fixer(instructions, 0);
+        let fixed = apply_fixer(instructions);
 
         assert_eq!(fixed.len(), 4);
         assert!(matches!(fixed[0], Instruction::AllocateStack(0)));

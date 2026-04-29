@@ -1,17 +1,23 @@
+use crate::assembly::ast::Register::{CX, DI, DX, R8, R9, SI};
 use crate::assembly::ast::{
     ConditionCode, FuncDef, Instruction, Operand, Program, Register, UnaryOp,
 };
+use crate::assembly::ast::Operand::Stack;
 use crate::tacky::ast::{
     BinaryOperator as TackyBinOp, BinaryOperator, Function, Instruction as TackyInstruction,
     UnaryOperator, Value,
 };
 
 #[derive(Debug)]
-pub struct AssemblyCreator;
+pub struct AssemblyCreator {
+    arg_registers: [Register; 6],
+}
 
 impl AssemblyCreator {
     pub fn new() -> AssemblyCreator {
-        AssemblyCreator
+        AssemblyCreator {
+            arg_registers: [DI, SI, DX, CX, R8, R9],
+        }
     }
 
     pub fn create_program(
@@ -28,7 +34,23 @@ impl AssemblyCreator {
 
     fn create_func_def(&mut self, func_def: &Function) -> anyhow::Result<FuncDef> {
         let name = func_def.name.clone();
-        let instructions = self.create_instructions(&func_def.body)?;
+        let num_arg_regs = self.arg_registers.len();
+        let mut instructions = vec![];
+
+        // Copy arguments into pseudo-registers:
+        for (idx, param) in func_def.parameters.iter().enumerate() {
+            let src = if idx < num_arg_regs {
+                Operand::Register(self.arg_registers[idx].clone())
+            } else {
+                let offset = (idx - num_arg_regs) * 8 + 16;
+                Stack(offset as i32)
+            };
+
+            let dst = Operand::PseudoReg(param.clone());
+            instructions.push(Instruction::Mov { src, dst });
+        }
+
+        instructions.extend(self.create_instructions(&func_def.body)?);
 
         Ok(FuncDef::new(name, instructions))
     }
@@ -76,14 +98,88 @@ impl AssemblyCreator {
                 TackyInstruction::Copy { src, dst } => self.push_copy(&mut ret, src, dst),
                 TackyInstruction::Label(name) => self.push_label(&mut ret, name),
                 TackyInstruction::FunctionCall {
-                    name: _,
-                    arguments: _,
-                    dst: _,
-                } => unimplemented!("function call is not supported yet"),
+                    name,
+                    arguments,
+                    dst,
+                } => self.push_function_call(&mut ret, name, arguments, dst),
             }
         }
 
         Ok(ret)
+    }
+
+    fn push_function_call(
+        &mut self,
+        instructions: &mut Vec<Instruction>,
+        name: &str,
+        arguments: &Vec<Value>,
+        dst: &Value,
+    ) {
+        use Register::*;
+
+        const ARG_SIZE: usize = 8;
+        let num_arg_registers = self.arg_registers.len();
+
+        let (register_args, stack_args) = if arguments.len() <= num_arg_registers {
+            (arguments.clone(), vec![])
+        } else {
+            let register_args = arguments
+                .iter()
+                .take(num_arg_registers)
+                .cloned()
+                .collect::<Vec<_>>();
+            let stack_args = arguments
+                .iter()
+                .skip(num_arg_registers)
+                .cloned()
+                .collect::<Vec<_>>();
+            (register_args, stack_args)
+        };
+
+        let stack_padding = if stack_args.len() % 2 == 0 { 0 } else { 8 };
+
+        if stack_padding > 0 {
+            instructions.push(Instruction::AllocateStack(stack_padding));
+        }
+
+        // System V calling convention:
+        // First 6 arguments into registers
+        for (reg_index, arg) in register_args.iter().enumerate() {
+            let src = self.create_operand(arg);
+            let dst = Operand::Register(self.arg_registers[reg_index].clone());
+            instructions.push(Instruction::Mov { src, dst });
+        }
+
+        // Remaining arguments pushed onto stack
+        for arg in stack_args.iter().rev() {
+            let op = self.create_operand(arg);
+            match op {
+                Operand::Register(_) | Operand::Immediate(_) => {
+                    instructions.push(Instruction::Push(op));
+                }
+                _ => {
+                    instructions.push(Instruction::Mov {
+                        src: op,
+                        dst: Operand::Register(AX),
+                    });
+                    instructions.push(Instruction::Push(Operand::Register(AX)));
+                }
+            }
+        }
+
+        instructions.push(Instruction::Call(name.to_string()));
+
+        // Adjust stack pointer
+        let bytes_to_remove = ARG_SIZE * stack_args.len() + stack_padding as usize;
+        if bytes_to_remove > 0 {
+            instructions.push(Instruction::DeAllocateStack(bytes_to_remove as i32));
+        }
+
+        // Set return value:
+        instructions.push(Instruction::Mov {
+            src: Operand::Register(AX),
+            dst: self.create_operand(dst),
+        });
     }
 
     fn push_return(&mut self, instructions: &mut Vec<Instruction>, value: &Value) {

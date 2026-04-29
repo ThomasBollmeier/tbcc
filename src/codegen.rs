@@ -170,6 +170,7 @@ impl Visitor for CodeGenerator {
                 let label = self.local_label(label);
                 self.write_label(&label);
             }
+            _ => todo!("Code generation for instruction {:?} not implemented yet", instruction),
         }
     }
 }

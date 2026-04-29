@@ -14,7 +14,7 @@ pub fn create_program(tacky_program: &crate::tacky::ast::Program) -> Result<ast:
     let mut pseudo_reg_replacer = pseudo_reg_replacer::PseudoRegReplacer::new();
     asm_program.walk_mut(&mut pseudo_reg_replacer);
 
-    let mut instruction_fixer = InstructionFixer::new(pseudo_reg_replacer.get_frame_size());
+    let mut instruction_fixer = InstructionFixer::new();
     asm_program.walk_mut(&mut instruction_fixer);
 
     Ok(asm_program)

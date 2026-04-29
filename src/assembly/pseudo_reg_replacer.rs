@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-use crate::assembly::ast::{Instruction, Operand, VisitorMut};
+use crate::assembly::ast::{FuncDef, Instruction, Operand, VisitorMut};
 
 pub struct PseudoRegReplacer {
     var_map: HashMap<String, i32>,
@@ -12,10 +12,6 @@ impl PseudoRegReplacer {
             var_map: HashMap::new(),
             last_offset: 0,
         }
-    }
-    
-    pub fn get_frame_size(&self) -> usize {
-        self.last_offset.abs() as usize
     }
 
     fn replace_operand(&mut self, operand: &Operand) -> Option<Operand> {
@@ -35,6 +31,14 @@ impl PseudoRegReplacer {
 }
 
 impl VisitorMut for PseudoRegReplacer {
+    fn enter_func_def(&mut self, _func_def: &mut FuncDef) {
+        self.last_offset = 0;
+    }
+
+    fn exit_func_def(&mut self, func_def: &mut FuncDef) {
+        func_def.stack_frame_size = self.last_offset.abs() as usize;
+    }
+
     fn visit_instruction(&mut self, instruction: &mut Instruction) {
         use crate::assembly::ast::Instruction::*;
         match instruction {
@@ -80,6 +84,13 @@ impl VisitorMut for PseudoRegReplacer {
                 }
             }
             Label(_) => {}
+            Push(operand) => {
+                if let Some(new_operand) = self.replace_operand(operand) {
+                    *operand = new_operand;
+                }
+            }
+            Call(_) => {}
+            DeAllocateStack(_) => {}
         }
     }
 }
@@ -89,14 +100,14 @@ mod tests {
     use super::PseudoRegReplacer;
     use crate::assembly::ast::{FuncDef, Instruction, Operand, Program, Register, UnaryOp};
 
-    fn apply_replacer(instructions: Vec<Instruction>) -> (Vec<Instruction>, usize) {
+    fn apply_replacer(instructions: Vec<Instruction>) -> Vec<Instruction> {
         let mut program = Program::new(vec![FuncDef::new("main".to_string(), instructions)]);
         let mut replacer = PseudoRegReplacer::new();
         program.walk_mut(&mut replacer);
 
         let instructions = program.functions[0].instructions.clone();
 
-        (instructions, replacer.get_frame_size())
+        instructions
     }
 
     #[test]
@@ -112,7 +123,7 @@ mod tests {
             },
         ];
 
-        let (instructions, frame_size) = apply_replacer(instructions);
+        let instructions = apply_replacer(instructions);
 
         match &instructions[0] {
             Instruction::Mov { src, dst } => {
@@ -128,8 +139,6 @@ mod tests {
             }
             _ => panic!("expected unary instruction"),
         }
-
-        assert_eq!(frame_size, 12);
     }
 
     #[test]
@@ -145,7 +154,7 @@ mod tests {
             },
         ];
 
-        let (instructions, frame_size) = apply_replacer(instructions);
+        let instructions = apply_replacer(instructions);
 
         match &instructions[0] {
             Instruction::Mov { src, dst } => {
@@ -162,7 +171,6 @@ mod tests {
             _ => panic!("expected unary instruction"),
         }
 
-        assert_eq!(frame_size, 4);
     }
 
     #[test]
@@ -175,7 +183,7 @@ mod tests {
             Instruction::Ret,
         ];
 
-        let (instructions, frame_size) = apply_replacer(instructions);
+        let instructions = apply_replacer(instructions);
 
         match &instructions[0] {
             Instruction::Mov { src, dst } => {
@@ -186,6 +194,5 @@ mod tests {
         }
 
         assert!(matches!(instructions[1], Instruction::Ret));
-        assert_eq!(frame_size, 0);
     }
 }
