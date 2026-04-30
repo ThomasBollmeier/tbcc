@@ -23,6 +23,8 @@ pub fn validate(
     label_name_generator: &NameGeneratorRef,
     program: &mut Program,
 ) -> Result<()> {
+    symbol_table::clear();
+
     let mut variable_resolver = IdentifierResolver::new(var_name_generator.clone());
     variable_resolver.resolve(program)?;
     

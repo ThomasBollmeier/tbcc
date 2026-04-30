@@ -1,4 +1,7 @@
-use crate::assembly::ast::{BinaryOp, ConditionCode, FuncDef, Instruction, Operand, Program, Register, UnaryOp, Visitor};
+use crate::assembly::ast::{
+    BinaryOp, ConditionCode, FuncDef, Instruction, Operand, Program, Register, UnaryOp, Visitor,
+};
+use crate::semantic::symbol_table;
 
 pub struct CodeGenerator {
     code: String,
@@ -28,12 +31,33 @@ impl CodeGenerator {
         self.code.push_str(&format!("# {}\n", comment));
     }
 
-    fn operand_to_string(&self, operand: &Operand) -> String {
+    fn operand_8byte_to_string(&mut self, operand: &Operand) -> String {
+        match operand {
+            Operand::Immediate(imm) => format!("${}", imm),
+            Operand::Register(Register::AX) => "%rax".to_string(),
+            Operand::Register(Register::CX) => "%rcx".to_string(),
+            Operand::Register(Register::DX) => "%rdx".to_string(),
+            Operand::Register(Register::DI) => "%rdi".to_string(),
+            Operand::Register(Register::SI) => "%rsi".to_string(),
+            Operand::Register(Register::R8) => "%r8".to_string(),
+            Operand::Register(Register::R9) => "%r9".to_string(),
+            Operand::Register(Register::R10) => "%r10".to_string(),
+            Operand::Register(Register::R11) => "%r11".to_string(),
+            Operand::Stack(offset) => format!("{}(%rbp)", offset),
+            _ => panic!("Unsupported operand type: {:?}", operand),
+        }
+    }
+
+    fn operand_4byte_to_string(&self, operand: &Operand) -> String {
         match operand {
             Operand::Immediate(imm) => format!("${}", imm),
             Operand::Register(Register::AX) => "%eax".to_string(),
             Operand::Register(Register::CX) => "%ecx".to_string(),
             Operand::Register(Register::DX) => "%edx".to_string(),
+            Operand::Register(Register::DI) => "%edi".to_string(),
+            Operand::Register(Register::SI) => "%esi".to_string(),
+            Operand::Register(Register::R8) => "%r8d".to_string(),
+            Operand::Register(Register::R9) => "%r9d".to_string(),
             Operand::Register(Register::R10) => "%r10d".to_string(),
             Operand::Register(Register::R11) => "%r11d".to_string(),
             Operand::Stack(offset) => format!("{}(%rbp)", offset),
@@ -47,6 +71,10 @@ impl CodeGenerator {
             Operand::Register(Register::AX) => "%al".to_string(),
             Operand::Register(Register::CX) => "%cl".to_string(),
             Operand::Register(Register::DX) => "%dl".to_string(),
+            Operand::Register(Register::DI) => "%dil".to_string(),
+            Operand::Register(Register::SI) => "%sil".to_string(),
+            Operand::Register(Register::R8) => "%r8b".to_string(),
+            Operand::Register(Register::R9) => "%r9b".to_string(),
             Operand::Register(Register::R10) => "%r10b".to_string(),
             Operand::Register(Register::R11) => "%r11b".to_string(),
             Operand::Stack(offset) => format!("{}(%rbp)", offset),
@@ -92,6 +120,28 @@ impl CodeGenerator {
             format!("L{}", label)
         }
     }
+
+    fn get_function_name(&self, original_function_name: &str) -> String {
+        if cfg!(target_os = "linux") {
+            match symbol_table::get(&original_function_name) {
+                Some(entry) => match &entry.c_type {
+                    symbol_table::CType::Function { is_defined, .. } => {
+                        if *is_defined {
+                            original_function_name.to_string()
+                        } else {
+                            format!("{}@PLT", original_function_name)
+                        }
+                    }
+                    _ => panic!("Expected '{}' to be a function", original_function_name),
+                },
+                None => panic!("Function '{}' not found in symbol table", original_function_name),
+            }
+        } else if cfg!(target_os = "macos") {
+            format!("_{}", original_function_name)
+        } else {
+            original_function_name.to_string()
+        }
+    }
 }
 
 impl Visitor for CodeGenerator {
@@ -110,17 +160,18 @@ impl Visitor for CodeGenerator {
 
     fn enter_func_def(&mut self, func_def: &FuncDef) {
         self.write_instruction(&format!(".globl {}", func_def.name));
-        self.write_label(&func_def.name);
+        self.write_label(&self.get_function_name(&func_def.name));
         self.write_instruction("pushq \t%rbp");
         self.write_instruction("movq \t%rsp, %rbp");
     }
+
     fn exit_func_def(&mut self, _func_def: &FuncDef) {}
 
     fn visit_instruction(&mut self, instruction: &Instruction) {
         match instruction {
             Instruction::Mov { src, dst } => {
-                let src = self.operand_to_string(src);
-                let dst = self.operand_to_string(dst);
+                let src = self.operand_4byte_to_string(src);
+                let dst = self.operand_4byte_to_string(dst);
                 self.write_instruction(&format!("movl \t{src}, {dst}"));
             }
             Instruction::Ret => {
@@ -130,17 +181,17 @@ impl Visitor for CodeGenerator {
             }
             Instruction::Unary { op, operand } => {
                 let op_str = self.unary_op_to_string(op);
-                let operand_str = self.operand_to_string(operand);
+                let operand_str = self.operand_4byte_to_string(operand);
                 self.write_instruction(&format!("{op_str} \t{operand_str}"));
             }
             Instruction::Binary { op, left, right } => {
                 let op_str = self.binary_op_to_string(op);
-                let left_str = self.operand_to_string(left);
-                let right_str = self.operand_to_string(right);
+                let left_str = self.operand_4byte_to_string(left);
+                let right_str = self.operand_4byte_to_string(right);
                 self.write_instruction(&format!("{op_str} \t{left_str}, {right_str}"));
             }
             Instruction::Idiv(operand) => {
-                let operand_str = self.operand_to_string(operand);
+                let operand_str = self.operand_4byte_to_string(operand);
                 self.write_instruction(&format!("idivl \t{operand_str}"));
             }
             Instruction::Cdq => self.write_instruction("cdq"),
@@ -148,8 +199,8 @@ impl Visitor for CodeGenerator {
                 self.write_instruction(&format!("subq \t${size}, %rsp"));
             }
             Instruction::Cmp { op1, op2 } => {
-                let op1_str = self.operand_to_string(op1);
-                let op2_str = self.operand_to_string(op2);
+                let op1_str = self.operand_4byte_to_string(op1);
+                let op2_str = self.operand_4byte_to_string(op2);
                 self.write_instruction(&format!("cmpl \t{op1_str}, {op2_str}"));
             }
             Instruction::Jmp(label) => {
@@ -170,7 +221,17 @@ impl Visitor for CodeGenerator {
                 let label = self.local_label(label);
                 self.write_label(&label);
             }
-            _ => todo!("Code generation for instruction {:?} not implemented yet", instruction),
+            Instruction::DeAllocateStack(size) => {
+                self.write_instruction(&format!("addq \t${size}, %rsp"));
+            }
+            Instruction::Push(operand) => {
+                let operand_str = self.operand_8byte_to_string(operand);
+                self.write_instruction(&format!("pushq \t{operand_str}"));
+            }
+            Instruction::Call(func_name) => {
+                let name = self.get_function_name(func_name);
+                self.write_instruction(&format!("call \t{name}"));
+            }
         }
     }
 }
@@ -178,36 +239,16 @@ impl Visitor for CodeGenerator {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::assembly;
     use crate::lexer::Lexer;
     use crate::parser::Parser;
     use crate::semantic;
     use crate::tacky::TackyEmitter;
-
-    fn make_emitter() -> TackyEmitter {
-        let label_name_gen = semantic::make_label_name_generator();
-        let tmp_var_name_gen = semantic::make_temp_var_name_generator();
-        TackyEmitter::new(label_name_gen, tmp_var_name_gen)
-    }
+    use crate::assembly;
 
     #[test]
     fn creates_asm_program_ok() {
-        let parser = Parser::new();
-        let lexer = Lexer::new();
-
         let code = "int main(void) { return -(~42); }";
-
-        let tokens = lexer.scan_tokens(code).expect("Failed to scan tokens");
-        let program = parser.parse(tokens).expect("Failed to parse program");
-
-        let mut tacky_emitter = make_emitter();
-        let tacky_program = tacky_emitter
-            .emit_program(&program)
-            .expect("Failed to emit tacky program");
-
-        let assembly_program =
-            assembly::create_program(&tacky_program).expect("Failed to create assembly program");
-
+        let assembly_program = create_assembly(code);
         let code_generator = CodeGenerator::new();
         let asm_code = code_generator.generate_assembly(&assembly_program);
 
@@ -218,30 +259,48 @@ mod tests {
 
     #[test]
     fn generates_asm_with_comparisons_and_jumps() {
+        let code = "int main(void) { return (1 < 2) && (3 != 4); }";
+        let assembly_program = create_assembly(code);
+        let code_generator = CodeGenerator::new();
+        let asm_code = code_generator.generate_assembly(&assembly_program);
+
+        assert!(
+            asm_code.contains("cmpl"),
+            "Expected a compare instruction in ASM"
+        );
+        assert!(
+            asm_code.contains("je \t"),
+            "Expected a conditional jump (je) in ASM"
+        );
+        assert!(
+            asm_code.contains("jmp \t"),
+            "Expected an unconditional jump in ASM"
+        );
+        assert!(
+            asm_code.contains("setl") || asm_code.contains("setne"),
+            "Expected setcc for comparisons in ASM"
+        );
+    }
+
+    fn create_assembly(code: &str) -> Program {
         let parser = Parser::new();
         let lexer = Lexer::new();
 
-        let code = "int main(void) { return (1 < 2) && (3 != 4); }";
-
         let tokens = lexer.scan_tokens(code).expect("Failed to scan tokens");
-        let program = parser.parse(tokens).expect("Failed to parse program");
+        let mut program = parser.parse(tokens).expect("Failed to parse program");
 
-        let mut tacky_emitter = make_emitter();
+        let var_name_gen = semantic::make_var_name_generator();
+        let label_name_gen = semantic::make_label_name_generator();
+        let tmp_var_name_gen = semantic::make_temp_var_name_generator();
+
+        semantic::validate(&var_name_gen, &label_name_gen, &mut program)
+            .expect("Semantic validation failed");
+
+        let mut tacky_emitter = TackyEmitter::new(label_name_gen, tmp_var_name_gen);
         let tacky_program = tacky_emitter
             .emit_program(&program)
             .expect("Failed to emit tacky program");
 
-        let assembly_program =
-            assembly::create_program(&tacky_program).expect("Failed to create assembly program");
-
-        let code_generator = CodeGenerator::new();
-        let asm_code = code_generator.generate_assembly(&assembly_program);
-
-        assert!(asm_code.contains("cmpl"), "Expected a compare instruction in ASM");
-        assert!(asm_code.contains("je \t"), "Expected a conditional jump (je) in ASM");
-        assert!(asm_code.contains("jmp \t"), "Expected an unconditional jump in ASM");
-        assert!(asm_code.contains("setl") || asm_code.contains("setne"), "Expected setcc for comparisons in ASM");
+        assembly::create_program(&tacky_program).expect("Failed to create assembly program")
     }
-
-
 }

@@ -27,11 +27,11 @@ impl WalkerMut for TypeChecker {
         match symbol_table::get(&func_decl.name) {
             Some(SymbolTableEntry {
                 c_type,
-                is_func_defined: is_func_defined_other,
             }) => {
                 match c_type {
                     CType::Function {
                         num_params: num_params_other,
+                        is_defined: is_func_defined_other,
                     } => {
                         if num_params_other != num_params {
                             return Err(anyhow!(
@@ -51,7 +51,11 @@ impl WalkerMut for TypeChecker {
                             // Update the symbol table entry to mark the function as defined
                             symbol_table::with_global_symbol_table_mut(|table| {
                                 table.modify(&func_decl.name).and_modify(|entry| {
-                                    entry.is_func_defined = true;
+                                    if let CType::Function { num_params, is_defined: _ } = &mut entry.c_type {
+                                        *entry = SymbolTableEntry {
+                                            c_type: CType::Function { num_params: *num_params, is_defined: true },
+                                        };
+                                    }
                                 });
                             });
 
@@ -60,7 +64,6 @@ impl WalkerMut for TypeChecker {
                                     param.clone(),
                                     SymbolTableEntry {
                                         c_type: CType::Int,
-                                        is_func_defined: false,
                                     },
                                 );
                             }
@@ -78,8 +81,7 @@ impl WalkerMut for TypeChecker {
                 symbol_table::insert(
                     func_decl.name.clone(),
                     SymbolTableEntry {
-                        c_type: CType::Function { num_params },
-                        is_func_defined,
+                        c_type: CType::Function { num_params, is_defined: is_func_defined },
                     },
                 );
 
@@ -87,7 +89,6 @@ impl WalkerMut for TypeChecker {
                     for param in &func_decl.parameters {
                         symbol_table::insert(param.clone(), SymbolTableEntry {
                             c_type: CType::Int,
-                            is_func_defined: false,
                         });
                     }
                 }
@@ -106,14 +107,13 @@ impl WalkerMut for TypeChecker {
             decl.name.clone(),
             SymbolTableEntry {
                 c_type: CType::Int,
-                is_func_defined: false,
             },
         );
 
         Ok(())
     }
 
-    fn enter_expression(&mut self, expr: &mut crate::ast::Expression) -> anyhow::Result<()> {
+    fn enter_expression(&mut self, expr: &mut Expression) -> anyhow::Result<()> {
         match expr {
             Expression::Var(name) => {
                 if let Some(entry) = symbol_table::get(name) {
@@ -133,7 +133,7 @@ impl WalkerMut for TypeChecker {
             Expression::FuncCall { name, args } => {
                 if let Some(entry) = symbol_table::get(name) {
                     match entry.c_type {
-                        CType::Function { num_params } => {
+                        CType::Function { num_params, is_defined: _ } => {
                             if args.len() != num_params {
                                 return Err(anyhow!(
                                     "Function '{}' called with {} arguments, but expects {}",

@@ -12,6 +12,10 @@ pub fn insert(name: impl Into<String>, new_entry: SymbolTableEntry) -> Option<Sy
     with_global_symbol_table_mut(|table| table.insert(name, new_entry))
 }
 
+pub fn clear() {
+    with_global_symbol_table_mut(|table| table.clear());
+}   
+
 pub fn global_symbol_table() -> &'static RwLock<SymbolTable> {
     SYMBOL_TABLE.get_or_init(|| RwLock::new(SymbolTable::new()))
 }
@@ -66,13 +70,15 @@ impl SymbolTable {
 #[derive(Debug, Clone)]
 pub struct SymbolTableEntry {
     pub c_type: CType,
-    pub is_func_defined: bool, // only relevant for functions
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum CType {
     Int,
-    Function { num_params: usize },
+    Function {
+        num_params: usize,
+        is_defined: bool
+    },
 }
 
 #[cfg(test)]
@@ -83,12 +89,11 @@ mod tests {
     fn local_table_insert_and_get() {
         let mut table = SymbolTable::new();
         table.insert("main", SymbolTableEntry{
-            c_type: CType::Function { num_params: 0 },
-            is_func_defined: true,
+            c_type: CType::Function { num_params: 0, is_defined: true },
         });
 
         assert_eq!(
-            Some(&CType::Function { num_params: 0 }),
+            Some(&CType::Function { num_params: 0, is_defined: true }),
             table.get_entry("main").map(|entry| &entry.c_type)
         );
     }
@@ -99,7 +104,6 @@ mod tests {
             table.clear();
             table.insert("x", SymbolTableEntry {
                 c_type: CType::Int,
-                is_func_defined: false,
             });
         });
 
