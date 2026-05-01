@@ -10,7 +10,7 @@
         .multiple(false)
 ))]
 pub struct Options {
-    pub source: String,
+    pub sources: Vec<String>,
     #[arg(long, help = "Stop after lexing")]
     pub lex: bool,
     #[arg(long, help = "Stop after parsing")]

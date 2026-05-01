@@ -10,7 +10,43 @@ use std::path::Path;
 use std::process::Command;
 
 pub fn compile(options: &Options) -> Result<()> {
-    let preprocessed_file = create_preprocessed_file(&options.source)?;
+    validate_options(options)?;
+
+    let mut assembly_files = vec![];
+
+    for source_file in &options.sources {
+        if let Some(assembly_file) = compile_file(source_file, options)? {
+            assembly_files.push(assembly_file);
+        }
+    }
+
+    if assembly_files.is_empty() {
+        return Ok(());
+    }
+
+    if !options.dont_assemble {
+        create_output_file(&assembly_files, options)?;
+        for assembly_file in &assembly_files {
+            remove_file(assembly_file)?;
+        }
+    }
+
+    Ok(())
+}
+
+fn validate_options(options: &Options) -> Result<()> {
+    if options.dont_link && options.sources.len() > 1 {
+        return Err(anyhow!(
+            r#"Cannot create object file when multiple assembly files are generated.
+Please use -S to stop before assembling or remove the -c flag to link the files together."#
+        ));
+    }
+
+    Ok(())
+}
+
+fn compile_file(source_file: &str, options: &Options) -> Result<Option<String>> {
+    let preprocessed_file = create_preprocessed_file(&source_file)?;
     let code = std::fs::read_to_string(&preprocessed_file)?;
 
     let lexer = Lexer::new();
@@ -19,14 +55,14 @@ pub fn compile(options: &Options) -> Result<()> {
     remove_file(&preprocessed_file)?;
 
     if options.lex {
-        return Ok(());
+        return Ok(None);
     }
 
     let parser = Parser::new();
     let mut program = parser.parse(tokens)?;
 
     if options.parse {
-        return Ok(());
+        return Ok(None);
     }
 
     let var_name_generator = semantic::make_var_name_generator();
@@ -35,7 +71,7 @@ pub fn compile(options: &Options) -> Result<()> {
     semantic::validate(&var_name_generator, &label_name_generator, &mut program)?;
 
     if options.validate {
-        return Ok(());
+        return Ok(None);
     }
 
     let tmp_var_name_generator = semantic::make_temp_var_name_generator();
@@ -43,44 +79,36 @@ pub fn compile(options: &Options) -> Result<()> {
     let tacky_program = tacky_emitter.emit_program(&program)?;
 
     if options.tacky {
-        return Ok(());
+        return Ok(None);
     }
 
     let asm_program = assembly::create_program(&tacky_program)?;
 
     if options.codegen {
-        return Ok(());
+        return Ok(None);
     }
 
     let assembly_code = CodeGenerator::new().generate_assembly(&asm_program);
-    let assembly_file = create_assembly_file(&options.source, &assembly_code)?;
+    let assembly_file = create_assembly_file(&source_file, &assembly_code)?;
 
-    if !options.dont_assemble {
-        create_output_file(&assembly_file, options)?;
-        remove_file(&assembly_file)?;
-    }
-
-    Ok(())
+    Ok(Some(assembly_file))
 }
 
-fn create_output_file(assembly_file: &str, options: &Options) -> Result<String> {
-    let new_extension = if !options.dont_link {
-        ""
-    } else {
-        "o"
-    };
-    let output_file = create_file_name_with_new_extension(assembly_file, new_extension)?;
+fn create_output_file(assembly_files: &Vec<String>, options: &Options) -> Result<()> {
+    let new_extension = if !options.dont_link { "" } else { "o" };
+
+    let main_file = assembly_files.get(0).unwrap();
+    let output_file = create_file_name_with_new_extension(main_file, new_extension)?;
 
     let status = {
         let mut cmd = Command::new("gcc");
-        cmd.arg(assembly_file);
+        for assembly_file in assembly_files {
+            cmd.arg(assembly_file);
+        }
         if options.dont_link {
             cmd.arg("-c");
         }
-        let status = cmd
-            .arg("-o")
-            .arg(&output_file)
-            .status()?;
+        let status = cmd.arg("-o").arg(&output_file).status()?;
         status
     };
 
@@ -88,7 +116,7 @@ fn create_output_file(assembly_file: &str, options: &Options) -> Result<String> 
         return Err(anyhow!("gcc preprocessing failed with status: {status}"));
     }
 
-    Ok(output_file)
+    Ok(())
 }
 
 fn create_assembly_file(source_file: &str, assembly_code: &str) -> Result<String> {
