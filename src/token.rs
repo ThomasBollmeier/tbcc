@@ -61,6 +61,8 @@ pub enum TokenType {
     Switch,
     Case,
     Default,
+    Extern,
+    Static,
 }
 
 #[derive(Debug, Clone, PartialEq)]

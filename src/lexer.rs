@@ -101,6 +101,8 @@ impl Lexer {
         lexer.keywords.insert("switch".to_string(), TokenType::Switch);
         lexer.keywords.insert("case".to_string(), TokenType::Case);
         lexer.keywords.insert("default".to_string(), TokenType::Default);
+        lexer.keywords.insert("static".to_string(), TokenType::Static);
+        lexer.keywords.insert("extern".to_string(), TokenType::Extern);
 
         lexer
     }
