@@ -1,4 +1,4 @@
-use crate::ast::{Block, Declaration, Expression, FunctionDeclaration, Program, Statement};
+use crate::ast::{Block, Expression, FunctionDeclaration, Program, Statement, VarDeclaration};
 use crate::semantic::name_generator::NameGeneratorRef;
 use crate::semantic::scope::{ResolutionStrategy, Scope, ScopeRef};
 use crate::semantic::walker;
@@ -87,13 +87,17 @@ impl WalkerMut for IdentifierResolver {
         if self.block_nesting_levels.last().unwrap() > &0 {
             self.open_scope();
         }
-        self.block_nesting_levels.last_mut().map(|level| *level += 1);
+        self.block_nesting_levels
+            .last_mut()
+            .map(|level| *level += 1);
 
         Ok(())
     }
 
     fn leave_block(&mut self, _: &mut Block) -> Result<()> {
-        self.block_nesting_levels.last_mut().map(|level| *level -= 1);
+        self.block_nesting_levels
+            .last_mut()
+            .map(|level| *level -= 1);
         if self.block_nesting_levels.last().unwrap() > &0 {
             self.close_scope();
         }
@@ -101,7 +105,7 @@ impl WalkerMut for IdentifierResolver {
         Ok(())
     }
 
-    fn enter_declaration(&mut self, decl: &mut Declaration) -> Result<()> {
+    fn enter_declaration(&mut self, decl: &mut VarDeclaration) -> Result<()> {
         let additional_data = IdentifierAdditional {
             linkage: Linkage::None,
         };
@@ -227,7 +231,7 @@ impl ResolutionStrategy<IdentifierAdditional> for IdentifierStrategy {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ast::{BlockItem, Expression, Statement};
+    use crate::ast::{BlockItem, Declaration, Expression, Statement};
     use crate::lexer::Lexer;
     use crate::parser::Parser;
     use crate::semantic::name_generator::make_var_name_generator;
@@ -246,10 +250,17 @@ mod tests {
         )
         .expect("Expected variable resolver to succeed");
 
-        let body = program
-            .function_decls
+        let main_func = if let Declaration::FunctionDecl(func_decl) = program
+            .decls
             .get(0)
             .expect("Expected main function to be present")
+        {
+            func_decl
+        } else {
+            unreachable!()
+        };
+
+        let body = main_func
             .body
             .as_ref()
             .expect("Expected main function body to be present");
@@ -257,12 +268,12 @@ mod tests {
         let body = &body.items;
 
         match &body[0] {
-            BlockItem::Declaration(decl) => assert_eq!(decl.name, "var.x.0"),
+            BlockItem::VarDeclaration(decl) => assert_eq!(decl.name, "var.x.0"),
             _ => panic!("Expected first item to be declaration"),
         }
 
         match &body[1] {
-            BlockItem::Declaration(decl) => {
+            BlockItem::VarDeclaration(decl) => {
                 assert_eq!(decl.name, "var.y.0");
                 match decl.init_expr.as_ref() {
                     Some(Expression::Var(name)) => assert_eq!(name, "var.x.0"),

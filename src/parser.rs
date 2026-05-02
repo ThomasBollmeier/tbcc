@@ -1,10 +1,11 @@
 use crate::ast::Statement::{For, IfStatement, Return, SwitchStatement};
 use crate::ast::{
     Associativity, BinaryOp, Block, BlockItem, Declaration, Expression, ForInit,
-    FunctionDeclaration, Label, Program, Statement, UnaryOp,
+    FunctionDeclaration, Label, Program, Statement, StorageClass, UnaryOp, VarDeclaration,
 };
 use crate::token::{Token, TokenStream, TokenType, TokenValue};
 use anyhow::{Result, anyhow};
+use std::collections::HashSet;
 
 pub struct Parser {}
 
@@ -27,20 +28,90 @@ impl Parser {
     fn program(&self, stream: &mut TokenStream) -> Result<Program> {
         let mut program = Program::new();
         while let Some(_) = stream.peek() {
-            program.add_function_decl(self.function_declaration(stream)?);
+            program.decls.push(self.declaration(stream)?);
         }
-
         Ok(program)
     }
 
-    fn function_declaration(&self, stream: &mut TokenStream) -> Result<FunctionDeclaration> {
-        self.expect(stream, TokenType::Int)?;
+    fn declaration(&self, stream: &mut TokenStream) -> Result<Declaration> {
+        let specifiers = self.specifiers(stream)?;
+        let storage_class = if specifiers.contains(&TokenType::Static) {
+            Some(StorageClass::Static)
+        } else if specifiers.contains(&TokenType::Extern) {
+            Some(StorageClass::Extern)
+        } else {
+            None
+        };
 
-        let name_token = self.expect(stream, TokenType::Identifier)?;
-        let name = name_token.lexeme;
+        let name = self.expect(stream, TokenType::Identifier)?.lexeme;
 
-        let mut parameters = vec![];
+        let next_token = stream
+            .peek()
+            .ok_or_else(|| anyhow!("Unexpected end of input after identifier"))?;
+
+        match next_token.token_type {
+            TokenType::LeftParen => {
+                let func_decl = self.function_declaration(stream, name, storage_class)?;
+                Ok(Declaration::FunctionDecl(func_decl))
+            }
+            _ => {
+                let var_decl = self.variable_declaration(stream, name, storage_class)?;
+                Ok(Declaration::VarDecl(var_decl))
+            }
+        }
+    }
+
+    fn specifiers(&self, stream: &mut TokenStream) -> Result<HashSet<TokenType>> {
+        let allowed_token_types: HashSet<TokenType> =
+            HashSet::from_iter([TokenType::Int, TokenType::Extern, TokenType::Static]);
+        let mut specifiers = HashSet::new();
+
+        while let Some(token) = stream.peek() {
+            if !allowed_token_types.contains(&token.token_type) {
+                break;
+            }
+            if specifiers.contains(&token.token_type) {
+                return Err(anyhow!("duplicate specifier {}", token.lexeme));
+            }
+            specifiers.insert(token.token_type.clone());
+            stream.advance();
+        }
+
+        let num_specifiers = specifiers.len();
+
+        match num_specifiers {
+            1 => {
+                if specifiers.contains(&TokenType::Static)
+                    || specifiers.contains(&TokenType::Extern)
+                {
+                    return Err(anyhow!(
+                        "static or extern specifier cannot be specified without type"
+                    ));
+                }
+            }
+            2 => {
+                if specifiers.contains(&TokenType::Static)
+                    && specifiers.contains(&TokenType::Extern)
+                {
+                    return Err(anyhow!(
+                        "static specifier cannot be specified together with extern"
+                    ));
+                }
+            }
+            _ => return Err(anyhow!("expected 1 or 2 specifiers")),
+        }
+
+        Ok(specifiers)
+    }
+
+    fn function_declaration(
+        &self,
+        stream: &mut TokenStream,
+        name: String,
+        storage_class: Option<StorageClass>,
+    ) -> Result<FunctionDeclaration> {
         self.expect(stream, TokenType::LeftParen)?;
+        let mut parameters = vec![];
         loop {
             let token = stream
                 .peek()
@@ -92,7 +163,12 @@ impl Parser {
             _ => Some(self.block(stream)?),
         };
 
-        Ok(FunctionDeclaration::new(name, parameters, body))
+        Ok(FunctionDeclaration::new(
+            name,
+            parameters,
+            body,
+            storage_class,
+        ))
     }
 
     fn block(&self, stream: &mut TokenStream) -> Result<Block> {
@@ -103,17 +179,16 @@ impl Parser {
         while let Some(token) = stream.peek() {
             match token.token_type {
                 TokenType::RightBrace => break,
-                TokenType::Int => {
-                    let token_third = stream.peek_with_offset(2);
-                    if let Some(token_third) = token_third {
-                        if token_third.token_type == TokenType::LeftParen {
-                            items.push(BlockItem::FunctionDeclaration(
-                                self.function_declaration(stream)?,
-                            ));
-                            continue;
+                TokenType::Int | TokenType::Static | TokenType::Extern => {
+                    let declaration = self.declaration(stream)?;
+                    match declaration {
+                        Declaration::FunctionDecl(func_decl) => {
+                            items.push(BlockItem::FunctionDeclaration(func_decl));
+                        }
+                        Declaration::VarDecl(var_decl) => {
+                            items.push(BlockItem::VarDeclaration(var_decl));
                         }
                     }
-                    items.push(BlockItem::Declaration(self.declaration(stream)?));
                 }
                 _ => {
                     items.push(BlockItem::Statement(self.statement(stream)?));
@@ -126,11 +201,12 @@ impl Parser {
         Ok(Block::new(items))
     }
 
-    fn declaration(&self, stream: &mut TokenStream) -> Result<Declaration> {
-        self.expect(stream, TokenType::Int)?;
-        let name_token = self.expect(stream, TokenType::Identifier)?;
-        let name = name_token.lexeme;
-
+    fn variable_declaration(
+        &self,
+        stream: &mut TokenStream,
+        name: String,
+        storage_class: Option<StorageClass>,
+    ) -> Result<VarDeclaration> {
         let init_expr = if let Some(token) = stream.peek() {
             if token.token_type == TokenType::Assign {
                 stream.advance(); // consume '='
@@ -144,7 +220,7 @@ impl Parser {
 
         self.expect(stream, TokenType::Semicolon)?;
 
-        Ok(Declaration::new(name, init_expr))
+        Ok(VarDeclaration::new(name, init_expr, storage_class))
     }
 
     fn statement(&self, stream: &mut TokenStream) -> Result<Statement> {
@@ -351,7 +427,7 @@ impl Parser {
             .ok_or_else(|| anyhow!("Unexpected end of input in for-loop initializer"))?;
 
         let for_init = match token.token_type {
-            TokenType::Int => ForInit::InitDeclaration(self.declaration(stream)?),
+            TokenType::Int => self.for_init_declaration(stream)?,
             TokenType::Semicolon => {
                 self.expect(stream, TokenType::Semicolon)?;
                 ForInit::InitExpression(None)
@@ -364,6 +440,14 @@ impl Parser {
         };
 
         Ok(for_init)
+    }
+
+    fn for_init_declaration(&self, stream: &mut TokenStream) -> Result<ForInit> {
+        self.expect(stream, TokenType::Int)?;
+        let name = self.expect(stream, TokenType::Identifier)?.lexeme;
+        let var_decl = self.variable_declaration(stream, name, None)?;
+
+        Ok(ForInit::InitDeclaration(var_decl))
     }
 
     fn expression_statement(&self, stream: &mut TokenStream) -> Result<Statement> {
@@ -930,6 +1014,43 @@ mod tests {
         }
         "#;
         parse_code(code, true);
+    }
+
+    #[test]
+    fn parse_functions_and_variables() {
+        let code = r#"
+        extern int answer = 42;
+        int do_something(int a);
+        int do_two_things(int a, int b) {
+            static int counter = 0;
+            counter++;
+            return
+                do_something(a) +
+                do_something(b);
+        }
+
+        int main(void)
+        {
+            for (i = 0; i < 1; i = i + 1)
+            {
+                return 0;
+            }
+        }
+        "#;
+        parse_code(code, true);
+    }
+
+    #[test]
+    fn parse_missing_type_specifier() {
+        let code = r#"
+        static answer = 42;
+
+        int main(void)
+        {
+            return answer;
+        }
+        "#;
+        parse_code(code, false);
     }
 
     fn parse_code(code: &str, expect_success: bool) {

@@ -98,7 +98,7 @@ impl WalkerMut for TypeChecker {
         Ok(())
     }
 
-    fn enter_declaration(&mut self, decl: &mut crate::ast::Declaration) -> anyhow::Result<()> {
+    fn enter_declaration(&mut self, decl: &mut crate::ast::VarDeclaration) -> anyhow::Result<()> {
         if let Some(_) = symbol_table::get(&decl.name) {
             return Err(anyhow!("Name '{}' has already been defined", decl.name));
         }

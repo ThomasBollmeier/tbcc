@@ -1,5 +1,5 @@
 use crate::ast::{
-    BinaryOp, Block, BlockItem, Declaration, Expression, ForInit, FunctionDeclaration, Label,
+    BinaryOp, Block, BlockItem, VarDeclaration, Expression, ForInit, FunctionDeclaration, Label,
     Statement, UnaryOp,
 };
 use crate::semantic::NameGeneratorRef;
@@ -28,8 +28,12 @@ impl TackyEmitter {
 
     pub fn emit_program(&mut self, program: &crate::ast::Program) -> Result<Program> {
         let functions = program
-            .function_decls
+            .decls
             .iter()
+            .filter_map(|decl| match decl {
+                crate::ast::Declaration::FunctionDecl(func_decl) => Some(func_decl),
+                _ => None,
+            })
             .filter(|func_decl| func_decl.body.is_some()) // Skip main function for now
             .map(|func_decl| self.emit_function_decl(func_decl))
             .collect::<Vec<Function>>();
@@ -62,7 +66,7 @@ impl TackyEmitter {
                     let func = self.emit_function_decl(func_decl);
                     instructions.extend(func.body.clone());
                 }
-                BlockItem::Declaration(decl) => {
+                BlockItem::VarDeclaration(decl) => {
                     instructions.extend(self.emit_declaration(decl));
                 }
                 BlockItem::Statement(stmt) => {
@@ -73,7 +77,7 @@ impl TackyEmitter {
         instructions
     }
 
-    fn emit_declaration(&mut self, declaration: &Declaration) -> Vec<Instruction> {
+    fn emit_declaration(&mut self, declaration: &VarDeclaration) -> Vec<Instruction> {
         let mut instructions = vec![];
 
         if let Some(expr) = &declaration.init_expr {

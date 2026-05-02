@@ -192,7 +192,7 @@ impl ResolutionStrategy<LabelAdditionalData> for LabelStrategy {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ast::{BlockItem, Expression, Statement};
+    use crate::ast::{BlockItem, Declaration, Expression, Statement};
     use crate::lexer::Lexer;
     use crate::parser::Parser;
     use crate::semantic::IdentifierResolver;
@@ -213,10 +213,14 @@ mod tests {
         )
         .expect("Expected label resolver to succeed for label declared in if branch");
 
-        let main_func = program
-            .function_decls
+        let main_func = if let Declaration::FunctionDecl(func_decl) = program
+            .decls
             .get(0)
-            .expect("Expected main function to be present");
+            .expect("Expected main function to be present") {
+            func_decl
+        } else {
+            unreachable!()
+        };
         let body = main_func
             .body
             .as_ref()

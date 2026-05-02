@@ -1,18 +1,18 @@
 #[derive(Debug, Clone)]
 pub struct Program {
-    pub function_decls: Vec<FunctionDeclaration>,
+    pub decls: Vec<Declaration>,
 }
 
 impl Program {
     pub fn new() -> Self {
-        Program {
-            function_decls: vec![],
-        }
+        Program { decls: vec![] }
     }
+}
 
-    pub fn add_function_decl(&mut self, function_decl: FunctionDeclaration) {
-        self.function_decls.push(function_decl);
-    }
+#[derive(Debug, Clone)]
+pub enum Declaration {
+    FunctionDecl(FunctionDeclaration),
+    VarDecl(VarDeclaration),
 }
 
 #[derive(Debug, Clone)]
@@ -20,16 +20,50 @@ pub struct FunctionDeclaration {
     pub name: String,
     pub parameters: Vec<String>,
     pub body: Option<Block>,
+    pub storage_class: Option<StorageClass>,
 }
 
 impl FunctionDeclaration {
-    pub fn new(name: String, parameters: Vec<String>, body: Option<Block>) -> Self {
+    pub fn new(
+        name: String,
+        parameters: Vec<String>,
+        body: Option<Block>,
+        storage_class: Option<StorageClass>,
+    ) -> Self {
         FunctionDeclaration {
             name,
             parameters,
             body,
+            storage_class,
         }
     }
+}
+
+#[derive(Debug, Clone)]
+pub struct VarDeclaration {
+    pub name: String,
+    pub init_expr: Option<Expression>,
+    pub storage_class: Option<StorageClass>,
+}
+
+impl VarDeclaration {
+    pub fn new(
+        name: String,
+        init_expr: Option<Expression>,
+        storage_class: Option<StorageClass>,
+    ) -> Self {
+        VarDeclaration {
+            name,
+            init_expr,
+            storage_class,
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub enum StorageClass {
+    Static,
+    Extern,
 }
 
 #[derive(Debug, Clone)]
@@ -45,21 +79,9 @@ impl Block {
 
 #[derive(Debug, Clone)]
 pub enum BlockItem {
-    Declaration(Declaration),
+    VarDeclaration(VarDeclaration),
     FunctionDeclaration(FunctionDeclaration),
     Statement(Statement),
-}
-
-#[derive(Debug, Clone)]
-pub struct Declaration {
-    pub name: String,
-    pub init_expr: Option<Expression>,
-}
-
-impl Declaration {
-    pub fn new(name: String, init_expr: Option<Expression>) -> Self {
-        Declaration { name, init_expr }
-    }
 }
 
 #[derive(Debug, Clone)]
@@ -112,27 +134,22 @@ pub enum Statement {
 #[derive(Debug, Clone)]
 pub enum Label {
     Label(String),
-    Case{
-        case_id: String,
-        value: Expression,
-    }, // <-- to be used in switch statement
-    Default {
-        default_id: String,
-    }, // <-- to be used in switch statement
+    Case { case_id: String, value: Expression }, // <-- to be used in switch statement
+    Default { default_id: String },              // <-- to be used in switch statement
 }
 
 impl Label {
     pub fn get_name(&self) -> String {
         match self {
             Label::Label(name) => name.clone(),
-            Label::Case { case_id, ..} => case_id.clone(),
+            Label::Case { case_id, .. } => case_id.clone(),
             Label::Default { default_id } => default_id.clone(),
         }
     }
 
     pub fn get_case_value(&self) -> Option<&Expression> {
         match self {
-            Label::Case{ value, ..} => Some(value),
+            Label::Case { value, .. } => Some(value),
             _ => None,
         }
     }
@@ -140,7 +157,7 @@ impl Label {
 
 #[derive(Debug, Clone)]
 pub enum ForInit {
-    InitDeclaration(Declaration),
+    InitDeclaration(VarDeclaration),
     InitExpression(Option<Expression>),
 }
 
@@ -148,7 +165,7 @@ pub enum ForInit {
 pub enum Expression {
     IntegerConstant(i32),
     Var(String),
-    FuncCall{
+    FuncCall {
         name: String,
         args: Vec<Expression>,
     },

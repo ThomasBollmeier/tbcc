@@ -152,12 +152,22 @@ enum TargetId {
 
 #[cfg(test)]
 mod tests {
+    use anyhow::anyhow;
     use super::*;
-    use crate::ast::{
-        Block, BlockItem, Expression, FunctionDeclaration, Label, Program, Statement,
-    };
+    use crate::ast::{Block, BlockItem, Declaration, Expression, FunctionDeclaration, Label, Program, Statement};
     use crate::lexer::Lexer;
     use crate::parser::Parser;
+
+    fn get_main_func(program: &Program) -> Result<&FunctionDeclaration> {
+        if let Declaration::FunctionDecl(func_decl) = program
+            .decls
+            .get(0)
+            .ok_or_else(|| anyhow!("No function declaration"))? {
+            Ok(func_decl)
+        } else {
+            Err(anyhow!("No function declaration"))
+        }
+    }
 
     #[test]
     fn rejects_break_outside_loop() {
@@ -203,13 +213,8 @@ mod tests {
             .label_loops(&mut program)
             .expect("Expected loop labeler to succeed");
 
-        let body = program
-            .function_decls
-            .get(0)
-            .expect("Expected main function to be present")
-            .body
-            .as_ref()
-            .expect("Expected main function body to be present");
+        let main_func = get_main_func(&program).expect("Expected main function to be present");
+        let body = main_func.body.as_ref().expect("Expected main function to have a body");
 
         match &body.items[0] {
             BlockItem::Statement(Statement::While { loop_id, body, .. }) => {
@@ -270,13 +275,8 @@ mod tests {
             .label_loops(&mut program)
             .expect("Expected loop labeler to succeed");
 
-        let body = program
-            .function_decls
-            .get(0)
-            .expect("Expected main function to be present")
-            .body
-            .as_ref()
-            .expect("Expected main function body to be present");
+        let main_func = get_main_func(&program).expect("Expected main function to be present");
+        let body = main_func.body.as_ref().expect("Expected main function to have a body");
 
         match &body.items[0] {
             BlockItem::Statement(Statement::While { loop_id, body, .. }) => {
@@ -372,13 +372,8 @@ mod tests {
             .label_loops(&mut program)
             .expect("Expected loop labeler to succeed");
 
-        let body = program
-            .function_decls
-            .get(0)
-            .expect("Expected main function to be present")
-            .body
-            .as_ref()
-            .expect("Expected main function body to be present");
+        let main_func = get_main_func(&program).expect("Expected main function to be present");
+        let body = main_func.body.as_ref().expect("Expected main function to have a body");
 
         match &body.items[0] {
             BlockItem::Statement(Statement::SwitchStatement {
@@ -503,11 +498,12 @@ mod tests {
 
     fn program_with_statement(statement: Statement) -> Program {
         let mut program = Program::new();
-        program.add_function_decl(FunctionDeclaration::new(
+        program.decls.push(Declaration::FunctionDecl(FunctionDeclaration::new(
             "main".to_string(),
             vec![],
             Some(Block::new(vec![BlockItem::Statement(statement)])),
-        ));
+            None,
+        )));
         program
     }
 

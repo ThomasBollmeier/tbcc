@@ -1,4 +1,4 @@
-use crate::ast::{Block, Declaration, Expression, ForInit, FunctionDeclaration, Program, Statement};
+use crate::ast::{Block, VarDeclaration, Expression, ForInit, FunctionDeclaration, Program, Statement, Declaration};
 use anyhow::Result;
 
 #[allow(unused_variables)]
@@ -24,10 +24,10 @@ pub trait WalkerMut {
         Ok(())
     }
 
-    fn enter_declaration(&mut self, decl: &mut Declaration) -> Result<()> {
+    fn enter_declaration(&mut self, decl: &mut VarDeclaration) -> Result<()> {
         Ok(())
     }
-    fn leave_declaration(&mut self, decl: &mut Declaration) -> Result<()> {
+    fn leave_declaration(&mut self, decl: &mut VarDeclaration) -> Result<()> {
         Ok(())
     }
 
@@ -48,8 +48,15 @@ pub trait WalkerMut {
 
 pub fn walk(program: &mut Program, walker: &mut impl WalkerMut) -> Result<()> {
     walker.enter_program(program)?;
-    for function_decl in &mut program.function_decls {
-        walk_function_decl(function_decl, walker)?;
+    for decl in &mut program.decls {
+        match decl {
+            Declaration::FunctionDecl(func_decl) => {
+                walk_function_decl(func_decl, walker)?;
+            }
+            Declaration::VarDecl(var_decl) => {
+                walk_declaration(var_decl, walker)?;
+            }
+        }
     }
     walker.leave_program(program)?;
     Ok(())
@@ -71,7 +78,7 @@ fn walk_block(block: &mut Block, walker: &mut impl WalkerMut) -> Result<()> {
             crate::ast::BlockItem::FunctionDeclaration(func_decl) => {
                 walk_function_decl(func_decl, walker)?;
             }
-            crate::ast::BlockItem::Declaration(decl) => {
+            crate::ast::BlockItem::VarDeclaration(decl) => {
                 walk_declaration(decl, walker)?;
             }
             crate::ast::BlockItem::Statement(stmt) => {
@@ -83,7 +90,7 @@ fn walk_block(block: &mut Block, walker: &mut impl WalkerMut) -> Result<()> {
     Ok(())
 }
 
-fn walk_declaration(decl: &mut Declaration, walker: &mut impl WalkerMut) -> Result<()> {
+fn walk_declaration(decl: &mut VarDeclaration, walker: &mut impl WalkerMut) -> Result<()> {
     walker.enter_declaration(decl)?;
     if let Some(init_expr) = &mut decl.init_expr {
         walk_expression(init_expr, walker)?;
