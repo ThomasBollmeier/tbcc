@@ -1,4 +1,4 @@
-use crate::ast::{Block, Expression, FunctionDeclaration, Program, Statement, VarDeclaration};
+use crate::ast::{Block, Expression, FunctionDeclaration, Program, Statement, StorageClass, VarDeclaration};
 use crate::semantic::name_generator::NameGeneratorRef;
 use crate::semantic::scope::{ResolutionStrategy, Scope, ScopeRef};
 use crate::semantic::walker;
@@ -7,7 +7,6 @@ use anyhow::{Result, anyhow};
 use std::rc::Rc;
 
 pub struct IdentifierResolver {
-    var_name_generator: NameGeneratorRef,
     current_scope: ScopeRef<IdentifierAdditional>,
     function_nesting_level: usize,
     block_nesting_levels: Vec<usize>,
@@ -16,7 +15,6 @@ pub struct IdentifierResolver {
 impl IdentifierResolver {
     pub fn new(var_name_generator: NameGeneratorRef) -> Self {
         Self {
-            var_name_generator: var_name_generator.clone(),
             current_scope: Scope::new_ref(None, var_name_generator, IdentifierStrategy::new_ref()),
             function_nesting_level: 0,
             block_nesting_levels: vec![],
@@ -28,29 +26,34 @@ impl IdentifierResolver {
     }
 
     fn open_scope(&mut self) {
-        let strategy = self.current_scope.borrow().strategy.clone();
-        self.current_scope = Scope::new_ref(
-            Some(self.current_scope.clone()),
-            self.var_name_generator.clone(),
-            strategy,
-        );
+        self.current_scope = Scope::new_child(&self.current_scope);
     }
 
     fn close_scope(&mut self) {
         let parent = self.current_scope.borrow().get_parent().unwrap();
         self.current_scope = parent;
     }
+
+    fn in_file_scope(&self) -> bool {
+        self.function_nesting_level == 0
+    }
+
+    fn in_block_scope(&self) -> bool {
+        !self.in_file_scope()
+    }
 }
 
 impl WalkerMut for IdentifierResolver {
     fn enter_func_decl(&mut self, func_decl: &mut FunctionDeclaration) -> Result<()> {
-        if func_decl.body.is_some() && self.function_nesting_level > 0 {
+        if func_decl.body.is_some() && self.in_block_scope() {
             return Err(anyhow!("Nested function definitions are not allowed"));
         }
 
-        let additional_data = IdentifierAdditional {
-            linkage: Linkage::External,
-        };
+        if let Some(StorageClass::Static) = func_decl.storage_class && self.in_block_scope() {
+            return Err(anyhow!("Static functions cannot be defined in block scope"));
+        }
+
+        let additional_data = IdentifierAdditional { has_linkage: true };
         let unique_name = self
             .current_scope
             .borrow_mut()
@@ -60,9 +63,7 @@ impl WalkerMut for IdentifierResolver {
         self.open_scope();
 
         for param in &mut func_decl.parameters {
-            let additional_data = IdentifierAdditional {
-                linkage: Linkage::None,
-            };
+            let additional_data = IdentifierAdditional { has_linkage: false };
             let unique_name = self
                 .current_scope
                 .borrow_mut()
@@ -106,8 +107,12 @@ impl WalkerMut for IdentifierResolver {
     }
 
     fn enter_declaration(&mut self, decl: &mut VarDeclaration) -> Result<()> {
+        if let Some(StorageClass::Extern) = decl.storage_class && self.in_block_scope() && decl.init_expr.is_some()  {
+            return Err(anyhow!("Extern variables cannot have initializers in block scope"));
+        }
+
         let additional_data = IdentifierAdditional {
-            linkage: Linkage::None,
+            has_linkage: self.in_file_scope(),
         };
         let unique_name = self
             .current_scope
@@ -173,13 +178,7 @@ impl WalkerMut for IdentifierResolver {
 
 #[derive(Debug, Clone)]
 struct IdentifierAdditional {
-    linkage: Linkage,
-}
-
-#[derive(Debug, Clone, PartialEq)]
-enum Linkage {
-    External,
-    None,
+    has_linkage: bool,
 }
 
 struct IdentifierStrategy;
@@ -200,8 +199,8 @@ impl ResolutionStrategy<IdentifierAdditional> for IdentifierStrategy {
     ) -> Result<()> {
         if exists_in_current_scope {
             let existing_data = existing_entry.as_ref().unwrap();
-            if existing_data.linkage != Linkage::External
-                || existing_data.linkage != new_additional_data.linkage
+            if !existing_data.has_linkage
+                || existing_data.has_linkage != new_additional_data.has_linkage
             {
                 return Err(anyhow!("'{name}' already exists in current scope"));
             }
@@ -218,7 +217,7 @@ impl ResolutionStrategy<IdentifierAdditional> for IdentifierStrategy {
         new_additional_data: &IdentifierAdditional,
         name_generator: NameGeneratorRef,
     ) -> Result<String> {
-        let unique_name = if new_additional_data.linkage == Linkage::None {
+        let unique_name = if !new_additional_data.has_linkage {
             name_generator.borrow_mut().make_unique_name(name)
         } else {
             name.to_string()

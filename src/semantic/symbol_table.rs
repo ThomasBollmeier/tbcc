@@ -70,6 +70,7 @@ impl SymbolTable {
 #[derive(Debug, Clone)]
 pub struct SymbolTableEntry {
     pub c_type: CType,
+    pub attrs: IdentAttrs,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -77,8 +78,26 @@ pub enum CType {
     Int,
     Function {
         num_params: usize,
-        is_defined: bool
     },
+}
+
+#[derive(Debug, Clone)]
+pub enum IdentAttrs {
+    Function {
+        is_defined: bool,
+        is_global: bool,
+    },
+    Static {
+        init_value: Option<InitialValue>,
+        is_global: bool,
+    },
+    Local,
+}
+
+#[derive(Debug, Clone)]
+pub enum InitialValue {
+    Tentative,
+    Initialized(i32),
 }
 
 #[cfg(test)]
@@ -89,11 +108,12 @@ mod tests {
     fn local_table_insert_and_get() {
         let mut table = SymbolTable::new();
         table.insert("main", SymbolTableEntry{
-            c_type: CType::Function { num_params: 0, is_defined: true },
+            c_type: CType::Function { num_params: 0 },
+            attrs: IdentAttrs::Function { is_defined: true, is_global: true },
         });
 
         assert_eq!(
-            Some(&CType::Function { num_params: 0, is_defined: true }),
+            Some(&CType::Function { num_params: 0 }),
             table.get_entry("main").map(|entry| &entry.c_type)
         );
     }
@@ -104,6 +124,7 @@ mod tests {
             table.clear();
             table.insert("x", SymbolTableEntry {
                 c_type: CType::Int,
+                attrs: IdentAttrs::Local,
             });
         });
 

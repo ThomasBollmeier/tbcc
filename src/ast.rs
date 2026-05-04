@@ -60,7 +60,7 @@ impl VarDeclaration {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum StorageClass {
     Static,
     Extern,

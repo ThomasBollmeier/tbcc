@@ -124,8 +124,8 @@ impl CodeGenerator {
     fn get_function_name(&self, original_function_name: &str) -> String {
         if cfg!(target_os = "linux") {
             match symbol_table::get(&original_function_name) {
-                Some(entry) => match &entry.c_type {
-                    symbol_table::CType::Function { is_defined, .. } => {
+                Some(entry) => match &entry.attrs {
+                    symbol_table::IdentAttrs::Function { is_defined, .. } => {
                         if *is_defined {
                             original_function_name.to_string()
                         } else {

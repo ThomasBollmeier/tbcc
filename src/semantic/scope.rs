@@ -39,6 +39,12 @@ impl<'a, T: Clone> Scope<T> {
         Rc::new(RefCell::new(Scope::new(parent, name_generator, strategy)))
     }
 
+    pub fn new_child(parent: &ScopeRef<T>) -> ScopeRef<T> {
+        let name_generator = parent.borrow().name_generator.clone();
+        let strategy = parent.borrow().strategy.clone();
+        Scope::new_ref(Some(parent.clone()), name_generator, strategy)
+    }
+
     pub fn get_parent(&self) -> Option<ScopeRef<T>> {
         self.parent.clone()
     }
