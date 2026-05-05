@@ -141,6 +141,79 @@ impl TypeChecker {
         &self,
         decl: &mut crate::ast::VarDeclaration,
     ) -> anyhow::Result<()> {
+        match decl.storage_class {
+            Some(StorageClass::Extern) => self.type_check_var_decl_block_scope_extern(decl),
+            Some(StorageClass::Static) => self.type_check_var_decl_block_scope_static(decl),
+            None => self.type_check_var_decl_block_scope_no_storage_class(decl),
+        }
+    }
+
+    fn type_check_var_decl_block_scope_extern(
+        &self,
+        decl: &mut crate::ast::VarDeclaration,
+    ) -> anyhow::Result<()> {
+        if decl.init_expr.is_some() {
+            return Err(anyhow!(
+                "Block-scope extern variable '{}' cannot have an initializer",
+                decl.name
+            ));
+        }
+
+        match symbol_table::get(&decl.name) {
+            Some(entry) => match entry.c_type {
+                CType::Int { .. } => {}
+                _ => {
+                    return Err(anyhow!(
+                        "Variable '{}' has already been declared as a non integer",
+                        decl.name
+                    ));
+                }
+            },
+            None => {
+                symbol_table::insert(
+                    decl.name.clone(),
+                    SymbolTableEntry {
+                        c_type: CType::Int,
+                        attrs: IdentAttrs::Static {
+                            init_value: None,
+                            is_global: true,
+                        },
+                    },
+                );
+            }
+        }
+
+        Ok(())
+    }
+
+    fn type_check_var_decl_block_scope_static(
+        &self,
+        decl: &mut crate::ast::VarDeclaration,
+    ) -> anyhow::Result<()> {
+        let init_value = match &decl.init_expr {
+            Some(Expression::IntegerConstant(i)) => Some(InitialValue::Initialized(*i)),
+            Some(_) => return Err(anyhow!("Non-constant initializer for local static declaration of {}", decl.name)),
+            None => Some(InitialValue::Initialized(0)),
+        };
+
+        symbol_table::insert(
+            decl.name.clone(),
+            SymbolTableEntry {
+                c_type: CType::Int,
+                attrs: IdentAttrs::Static {
+                    init_value,
+                    is_global: false,
+                },
+            },
+        );
+
+        Ok(())
+    }
+
+    fn type_check_var_decl_block_scope_no_storage_class(
+        &self,
+        decl: &mut crate::ast::VarDeclaration,
+    ) -> anyhow::Result<()> {
         if let Some(_) = symbol_table::get(&decl.name) {
             return Err(anyhow!("Name '{}' has already been defined", decl.name));
         }
@@ -349,6 +422,30 @@ mod tests {
         int add(int a, int b) {
             return a + b;
         }
+        "#;
+
+        check_code(code).expect("Expected code to type check successfully");
+    }
+
+    #[test]
+    fn check_extern_block_scope_ok() {
+        let code = r#"
+        int main(void) {
+            int outer = 1;
+            int foo = 0;
+            if (outer) {
+                /* You can declare a variable with linkage
+                * multiple times in the same block;
+                * these both refer to the 'foo' variable defined below
+                */
+                extern int foo;
+                extern int foo;
+                return foo;
+            }
+            return 0;
+        }
+
+        int foo = 3;
         "#;
 
         check_code(code).expect("Expected code to type check successfully");

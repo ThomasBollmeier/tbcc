@@ -112,7 +112,7 @@ impl WalkerMut for IdentifierResolver {
         }
 
         let additional_data = IdentifierAdditional {
-            has_linkage: self.in_file_scope(),
+            has_linkage: self.in_file_scope() || decl.storage_class == Some(StorageClass::Extern),
         };
         let unique_name = self
             .current_scope

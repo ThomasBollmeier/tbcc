@@ -25,12 +25,14 @@ impl Lexer {
             keywords: HashMap::new(),
         };
 
-        lexer.add_token_type_full(TokenType::Whitespace, r"\s+", true, None);
-        lexer.add_token_type_full(TokenType::LineComment, r"//.*", true, None);
+        lexer.add_token_type_full(TokenType::Whitespace, r"\s+", true, false, None);
+        lexer.add_token_type_full(TokenType::LineComment, r"//.*", true, false, None);
+        lexer.add_token_type_full(TokenType::BlockComment, r"/\*.*\*/", true, true, None);
 
         lexer.add_token_type_full(
             TokenType::IntegerConstant,
             r"\d+\b",
+            false,
             false,
             Some(|lexeme| {
                 let value = lexeme.parse::<i32>().unwrap();
@@ -153,7 +155,7 @@ impl Lexer {
     }
 
     fn add_token_type(&mut self, token_type: TokenType, pattern: &str) {
-        self.add_token_type_full(token_type, pattern, false, None);
+        self.add_token_type_full(token_type, pattern, false, false, None);
     }
 
     fn add_token_type_full(
@@ -161,17 +163,24 @@ impl Lexer {
         token_type: TokenType,
         pattern: &str,
         skip: bool,
+        multi_line: bool,
         value_fn_opt: Option<ValueFn>,
     ) {
-        let pattern = if pattern.starts_with("^") {
-            pattern
+        let mut pattern = if pattern.starts_with("^") {
+            pattern.to_string()
         } else {
-            &format!("^{}", pattern)
+            format!("^{}", pattern)
         };
+
+        if multi_line {
+            pattern = "(?ms)".to_string() + &pattern;
+        }
+
+        let regex = Regex::new(&pattern).unwrap();
 
         let token_type_data = TokenTypeData {
             token_type,
-            regex: Regex::new(pattern).unwrap(),
+            regex,
             skip,
             value_fn_opt,
         };
