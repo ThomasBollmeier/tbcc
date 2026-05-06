@@ -1,6 +1,10 @@
 #[derive(Debug, Clone, PartialEq)]
-pub struct Program {
-    pub functions: Vec<Function>,
+pub struct Program (pub Vec<TopLevel>);
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum TopLevel {
+    Function(Function),
+    StaticVariable(StaticVariable),
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -8,6 +12,14 @@ pub struct Function {
     pub name: String,
     pub parameters: Vec<String>,
     pub body: Vec<Instruction>,
+    pub is_global: bool,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct StaticVariable {
+    pub name: String,
+    pub is_global: bool,
+    pub initial_value: Value,
 }
 
 #[derive(Debug, Clone, PartialEq)]

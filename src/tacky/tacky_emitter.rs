@@ -1,13 +1,13 @@
-use crate::ast::{
-    BinaryOp, Block, BlockItem, VarDeclaration, Expression, ForInit, FunctionDeclaration, Label,
-    Statement, UnaryOp,
-};
-use crate::semantic::NameGeneratorRef;
-use anyhow::Result;
-
 use super::ast::Instruction::Unary;
 use super::ast::Value::IntegerConstant;
-use super::ast::{BinaryOperator, Function, Instruction, Program, UnaryOperator, Value};
+use super::ast::{BinaryOperator, Function, Instruction, Program, TopLevel, UnaryOperator, Value};
+use crate::ast::{
+    BinaryOp, Block, BlockItem, Expression, ForInit, FunctionDeclaration, Label, Statement,
+    UnaryOp, VarDeclaration,
+};
+use crate::semantic::symbol_table::{IdentAttrs, InitialValue};
+use crate::semantic::{NameGeneratorRef, symbol_table};
+use anyhow::{Result, anyhow};
 
 #[derive(Clone)]
 pub struct TackyEmitter {
@@ -27,7 +27,7 @@ impl TackyEmitter {
     }
 
     pub fn emit_program(&mut self, program: &crate::ast::Program) -> Result<Program> {
-        let functions = program
+        let mut top_levels = program
             .decls
             .iter()
             .filter_map(|decl| match decl {
@@ -36,45 +36,88 @@ impl TackyEmitter {
             })
             .filter(|func_decl| func_decl.body.is_some()) // Skip main function for now
             .map(|func_decl| self.emit_function_decl(func_decl))
-            .collect::<Vec<Function>>();
+            .filter_map(Result::ok)
+            .map(|function| TopLevel::Function(function))
+            .collect::<Vec<TopLevel>>();
 
-        Ok(Program { functions })
+        top_levels.extend(Self::read_var_decls_from_symbol_table());
+
+        Ok(Program(top_levels))
     }
 
-    fn emit_function_decl(&mut self, function_declaration: &FunctionDeclaration) -> Function {
+    fn read_var_decls_from_symbol_table() -> Vec<TopLevel> {
+        symbol_table::with_global_symbol_table(|table| {
+            table
+                .get_all_entries()
+                .filter_map(|(name, entry)| match &entry.attrs {
+                    IdentAttrs::Static {
+                        is_global,
+                        init_value,
+                    } => {
+                        let initial_value = match init_value {
+                            Some(InitialValue::Initialized(ival)) => IntegerConstant(*ival),
+                            Some(InitialValue::Tentative) => IntegerConstant(0),
+                            None => return None,
+                        };
+                        Some(TopLevel::StaticVariable(
+                            crate::tacky::ast::StaticVariable {
+                                name: name.clone(),
+                                is_global: *is_global,
+                                initial_value,
+                            },
+                        ))
+                    }
+                    _ => None,
+                })
+                .collect()
+        })
+    }
+
+    fn emit_function_decl(
+        &mut self,
+        function_declaration: &FunctionDeclaration,
+    ) -> Result<Function> {
         let name = function_declaration.name.clone();
         let instructions = if let Some(body) = &function_declaration.body {
-            let mut instructions = self.emit_block(body);
+            let mut instructions = self.emit_block(body)?;
             instructions.push(Instruction::Return(IntegerConstant(0))); // Ensure function ends with a return
             instructions
         } else {
             vec![]
         };
 
-        Function {
+        let entry = symbol_table::get(&name)
+            .ok_or_else(|| anyhow!("Function {} not found in symbol table", name))?;
+        let is_global = match entry.attrs {
+            IdentAttrs::Function { is_global, .. } => is_global,
+            _ => return Err(anyhow!("Function {} not found in symbol table", name)),
+        };
+
+        Ok(Function {
             name,
             parameters: function_declaration.parameters.clone(),
             body: instructions,
-        }
+            is_global,
+        })
     }
 
-    fn emit_block(&mut self, block: &Block) -> Vec<Instruction> {
+    fn emit_block(&mut self, block: &Block) -> Result<Vec<Instruction>> {
         let mut instructions = vec![];
         for item in &block.items {
             match item {
                 BlockItem::FunctionDeclaration(func_decl) => {
-                    let func = self.emit_function_decl(func_decl);
+                    let func = self.emit_function_decl(func_decl)?;
                     instructions.extend(func.body.clone());
                 }
                 BlockItem::VarDeclaration(decl) => {
                     instructions.extend(self.emit_declaration(decl));
                 }
                 BlockItem::Statement(stmt) => {
-                    instructions.extend(self.emit_statement(stmt));
+                    instructions.extend(self.emit_statement(stmt)?);
                 }
             }
         }
-        instructions
+        Ok(instructions)
     }
 
     fn emit_declaration(&mut self, declaration: &VarDeclaration) -> Vec<Instruction> {
@@ -92,7 +135,7 @@ impl TackyEmitter {
         instructions
     }
 
-    fn emit_statement(&mut self, stmt: &Statement) -> Vec<Instruction> {
+    fn emit_statement(&mut self, stmt: &Statement) -> Result<Vec<Instruction>> {
         match stmt {
             Statement::Return(expr) => self.emit_return_statement(expr),
             Statement::Expression(expr) => self.emit_expression_statement(expr),
@@ -142,7 +185,7 @@ impl TackyEmitter {
         condition: &Option<Expression>,
         post: &Option<Expression>,
         body: &Box<Statement>,
-    ) -> Vec<Instruction> {
+    ) -> Result<Vec<Instruction>> {
         let mut instructions = vec![];
 
         let start_label = self.make_start_label(loop_id);
@@ -161,7 +204,7 @@ impl TackyEmitter {
             });
         }
 
-        instructions.extend(self.emit_statement(body));
+        instructions.extend(self.emit_statement(body)?);
 
         instructions.push(Instruction::Label(continue_label));
         if let Some(post) = post {
@@ -172,7 +215,7 @@ impl TackyEmitter {
         });
         instructions.push(Instruction::Label(break_label));
 
-        instructions
+        Ok(instructions)
     }
 
     fn emit_for_init(&mut self, init: &ForInit) -> Vec<Instruction> {
@@ -197,7 +240,7 @@ impl TackyEmitter {
         loop_id: &str,
         condition: &Expression,
         body: &Statement,
-    ) -> Vec<Instruction> {
+    ) -> Result<Vec<Instruction>> {
         let mut instructions = vec![];
 
         let break_label = self.make_break_label(loop_id);
@@ -209,13 +252,13 @@ impl TackyEmitter {
             condition: condition_value,
             target: break_label.clone(),
         });
-        instructions.extend(self.emit_statement(body));
+        instructions.extend(self.emit_statement(body)?);
         instructions.push(Instruction::Jump {
             target: continue_label.clone(),
         });
         instructions.push(Instruction::Label(break_label));
 
-        instructions
+        Ok(instructions)
     }
 
     fn emit_do_while_statement(
@@ -223,12 +266,12 @@ impl TackyEmitter {
         loop_id: &str,
         body: &Statement,
         condition: &Expression,
-    ) -> Vec<Instruction> {
+    ) -> Result<Vec<Instruction>> {
         let mut instructions = vec![];
 
         let start_label = self.make_start_label(loop_id);
         instructions.push(Instruction::Label(start_label.clone()));
-        instructions.extend(self.emit_statement(body));
+        instructions.extend(self.emit_statement(body)?);
         instructions.push(Instruction::Label(self.make_continue_label(loop_id)));
         let condition_value = self.emit_expression(condition, &mut instructions);
         instructions.push(Instruction::JumpIfNotZero {
@@ -237,53 +280,53 @@ impl TackyEmitter {
         });
         instructions.push(Instruction::Label(self.make_break_label(loop_id)));
 
-        instructions
+        Ok(instructions)
     }
 
-    fn emit_return_statement(&mut self, expr: &Expression) -> Vec<Instruction> {
+    fn emit_return_statement(&mut self, expr: &Expression) -> Result<Vec<Instruction>> {
         let mut instructions = vec![];
         let value = self.emit_expression(expr, &mut instructions);
         instructions.push(Instruction::Return(value));
-        instructions
+        Ok(instructions)
     }
 
-    fn emit_expression_statement(&mut self, expr: &Expression) -> Vec<Instruction> {
+    fn emit_expression_statement(&mut self, expr: &Expression) -> Result<Vec<Instruction>> {
         let mut instructions = vec![];
         self.emit_expression(expr, &mut instructions);
-        instructions
+        Ok(instructions)
     }
 
-    fn emit_null_statement(&mut self) -> Vec<Instruction> {
-        vec![]
+    fn emit_null_statement(&mut self) -> Result<Vec<Instruction>> {
+        Ok(vec![])
     }
 
-    fn emit_goto_statement(&mut self, label: &str) -> Vec<Instruction> {
-        vec![Instruction::Jump {
+    fn emit_goto_statement(&mut self, label: &str) -> Result<Vec<Instruction>> {
+        Ok(vec![Instruction::Jump {
             target: label.to_string(),
-        }]
+        }])
     }
 
     fn emit_labeled_statement(
         &mut self,
         label: &Label,
         statement: &Box<Statement>,
-    ) -> Vec<Instruction> {
+    ) -> Result<Vec<Instruction>> {
         let name = label.get_name();
         let mut instructions = vec![Instruction::Label(name)];
-        instructions.extend(self.emit_statement(statement));
-        instructions
+        instructions.extend(self.emit_statement(statement)?);
+        Ok(instructions)
     }
 
-    fn emit_break_statement(&mut self, loop_id: &str) -> Vec<Instruction> {
-        vec![Instruction::Jump {
+    fn emit_break_statement(&mut self, loop_id: &str) -> Result<Vec<Instruction>> {
+        Ok(vec![Instruction::Jump {
             target: self.make_break_label(loop_id),
-        }]
+        }])
     }
 
-    fn emit_continue_statement(&mut self, loop_id: &str) -> Vec<Instruction> {
-        vec![Instruction::Jump {
+    fn emit_continue_statement(&mut self, loop_id: &str) -> Result<Vec<Instruction>> {
+        Ok(vec![Instruction::Jump {
             target: self.make_continue_label(loop_id),
-        }]
+        }])
     }
 
     fn emit_if_statement(
@@ -291,7 +334,7 @@ impl TackyEmitter {
         condition: &Expression,
         then_branch: &Box<Statement>,
         else_branch: &Option<Box<Statement>>,
-    ) -> Vec<Instruction> {
+    ) -> Result<Vec<Instruction>> {
         let mut instructions = vec![];
         let end_label = self.make_label("if_end");
         let condition_value = self.emit_expression(condition, &mut instructions);
@@ -303,24 +346,24 @@ impl TackyEmitter {
                 target: else_label.clone(),
             });
 
-            instructions.extend(self.emit_statement(then_branch));
+            instructions.extend(self.emit_statement(then_branch)?);
             instructions.push(Instruction::Jump {
                 target: end_label.clone(),
             });
             instructions.push(Instruction::Label(else_label));
-            instructions.extend(self.emit_statement(else_branch));
+            instructions.extend(self.emit_statement(else_branch)?);
         } else {
             instructions.push(Instruction::JumpIfZero {
                 condition: condition_value,
                 target: end_label.clone(),
             });
 
-            instructions.extend(self.emit_statement(then_branch));
+            instructions.extend(self.emit_statement(then_branch)?);
         }
 
         instructions.push(Instruction::Label(end_label));
 
-        instructions
+        Ok(instructions)
     }
 
     fn emit_switch_statement(
@@ -329,7 +372,7 @@ impl TackyEmitter {
         condition: &Expression,
         body: &Statement,
         arms: &Vec<(String, Option<Expression>)>,
-    ) -> Vec<Instruction> {
+    ) -> Result<Vec<Instruction>> {
         let mut instructions = vec![];
 
         let condition_value = self.emit_expression(condition, &mut instructions);
@@ -361,11 +404,11 @@ impl TackyEmitter {
             target: break_label.clone(),
         });
 
-        instructions.extend(self.emit_statement(body));
+        instructions.extend(self.emit_statement(body)?);
 
         instructions.push(Instruction::Label(break_label));
 
-        instructions
+        Ok(instructions)
     }
 
     fn emit_expression(&mut self, expr: &Expression, instructions: &mut Vec<Instruction>) -> Value {
@@ -682,7 +725,7 @@ mod tests {
         let mut emitter = make_emitter();
         let stmt = Statement::Return(Expression::IntegerConstant(42));
         let expected = vec![Instruction::Return(IntegerConstant(42))];
-        let actual = emitter.emit_statement(&stmt);
+        let actual = emitter.emit_statement(&stmt).unwrap();
 
         assert_eq!(expected, actual);
     }
@@ -722,7 +765,7 @@ mod tests {
             },
             Return(Variable("tmp.2".to_string())),
         ];
-        let actual = emitter.emit_statement(&stmt);
+        let actual = emitter.emit_statement(&stmt).unwrap();
 
         assert_eq!(expected, actual);
     }
@@ -761,7 +804,7 @@ mod tests {
             Return(Variable("tmp.1".to_string())),
         ];
 
-        let actual = emitter.emit_statement(&stmt);
+        let actual = emitter.emit_statement(&stmt).unwrap();
         assert_eq!(expected, actual);
     }
 
@@ -789,7 +832,7 @@ mod tests {
             Return(Variable("tmp.0".to_string())),
         ];
 
-        let actual = emitter.emit_statement(&stmt);
+        let actual = emitter.emit_statement(&stmt).unwrap();
         assert_eq!(expected, actual);
     }
 
@@ -817,7 +860,7 @@ mod tests {
             Return(Variable("tmp.0".to_string())),
         ];
 
-        let actual = emitter.emit_statement(&stmt);
+        let actual = emitter.emit_statement(&stmt).unwrap();
         assert_eq!(expected, actual);
     }
 
@@ -859,7 +902,7 @@ mod tests {
             Return(Variable("tmp.0".to_string())),
         ];
 
-        let actual = emitter.emit_statement(&stmt);
+        let actual = emitter.emit_statement(&stmt).unwrap();
         assert_eq!(expected, actual);
     }
 
@@ -901,7 +944,7 @@ mod tests {
             Return(Variable("tmp.0".to_string())),
         ];
 
-        let actual = emitter.emit_statement(&stmt);
+        let actual = emitter.emit_statement(&stmt).unwrap();
         assert_eq!(expected, actual);
     }
 
@@ -937,7 +980,7 @@ mod tests {
             Return(Variable("a".to_string())),
         ];
 
-        let actual = emitter.emit_statement(&stmt);
+        let actual = emitter.emit_statement(&stmt).unwrap();
         assert_eq!(expected, actual);
     }
 
@@ -977,7 +1020,7 @@ mod tests {
             Return(Variable("tmp.1".to_string())),
         ];
 
-        let actual = emitter.emit_statement(&stmt);
+        let actual = emitter.emit_statement(&stmt).unwrap();
         assert_eq!(expected, actual);
     }
 
@@ -1013,7 +1056,7 @@ mod tests {
             Return(Variable("a".to_string())),
         ];
 
-        let actual = emitter.emit_statement(&stmt);
+        let actual = emitter.emit_statement(&stmt).unwrap();
         assert_eq!(expected, actual);
     }
 
@@ -1053,7 +1096,7 @@ mod tests {
             Return(Variable("tmp.1".to_string())),
         ];
 
-        let actual = emitter.emit_statement(&stmt);
+        let actual = emitter.emit_statement(&stmt).unwrap();
         assert_eq!(expected, actual);
     }
 
@@ -1077,7 +1120,7 @@ mod tests {
             Label("if_end_0".to_string()),
         ];
 
-        let actual = emitter.emit_statement(&stmt);
+        let actual = emitter.emit_statement(&stmt).unwrap();
         assert_eq!(expected, actual);
     }
 
@@ -1107,7 +1150,7 @@ mod tests {
             Label("if_end_0".to_string()),
         ];
 
-        let actual = emitter.emit_statement(&stmt);
+        let actual = emitter.emit_statement(&stmt).unwrap();
         assert_eq!(expected, actual);
     }
 
@@ -1144,7 +1187,7 @@ mod tests {
             Return(Variable("tmp.0".to_string())),
         ];
 
-        let actual = emitter.emit_statement(&stmt);
+        let actual = emitter.emit_statement(&stmt).unwrap();
         assert_eq!(expected, actual);
     }
 
@@ -1183,7 +1226,7 @@ mod tests {
             Label("if_end_0".to_string()),
         ];
 
-        let actual = emitter.emit_statement(&stmt);
+        let actual = emitter.emit_statement(&stmt).unwrap();
         assert_eq!(expected, actual);
     }
 
@@ -1224,7 +1267,7 @@ mod tests {
             Label("break.loop.0".to_string()),
         ];
 
-        let actual = emitter.emit_statement(&stmt);
+        let actual = emitter.emit_statement(&stmt).unwrap();
         assert_eq!(expected, actual);
     }
 
@@ -1263,7 +1306,7 @@ mod tests {
             Label("break.loop.1".to_string()),
         ];
 
-        let actual = emitter.emit_statement(&stmt);
+        let actual = emitter.emit_statement(&stmt).unwrap();
         assert_eq!(expected, actual);
     }
 
@@ -1287,7 +1330,7 @@ mod tests {
             Return(Variable("tmp.0".to_string())),
         ];
 
-        let actual = emitter.emit_statement(&stmt);
+        let actual = emitter.emit_statement(&stmt).unwrap();
         assert_eq!(expected, actual);
     }
 
@@ -1322,16 +1365,13 @@ mod tests {
             // function call with evaluated args
             FunctionCall {
                 name: "bar".to_string(),
-                arguments: vec![
-                    IntegerConstant(1),
-                    Variable("tmp.0".to_string()),
-                ],
+                arguments: vec![IntegerConstant(1), Variable("tmp.0".to_string())],
                 dst: Variable("tmp.1".to_string()),
             },
             Return(Variable("tmp.1".to_string())),
         ];
 
-        let actual = emitter.emit_statement(&stmt);
+        let actual = emitter.emit_statement(&stmt).unwrap();
         assert_eq!(expected, actual);
     }
 
@@ -1375,7 +1415,7 @@ mod tests {
             Label("break.loop.2".to_string()),
         ];
 
-        let actual = emitter.emit_statement(&stmt);
+        let actual = emitter.emit_statement(&stmt).unwrap();
         assert_eq!(expected, actual);
     }
 }

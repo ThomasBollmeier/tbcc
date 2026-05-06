@@ -1,4 +1,4 @@
-use std::collections::hash_map::Entry;
+use std::collections::hash_map::{Entry, Iter};
 use std::collections::HashMap;
 use std::sync::{OnceLock, RwLock};
 
@@ -56,6 +56,10 @@ impl SymbolTable {
 
     pub fn get_entry_cloned(&self, name: &str) -> Option<SymbolTableEntry> {
         self.entries.get(name).cloned()
+    }
+
+    pub fn get_all_entries(&self) -> Iter<'_, String, SymbolTableEntry> {
+        self.entries.iter()
     }
 
     pub fn modify(&mut self, name: &str) -> Entry<'_, String, SymbolTableEntry> {

@@ -1,11 +1,11 @@
+use crate::assembly::ast::Operand::Stack;
 use crate::assembly::ast::Register::{CX, DI, DX, R8, R9, SI};
 use crate::assembly::ast::{
     ConditionCode, FuncDef, Instruction, Operand, Program, Register, UnaryOp,
 };
-use crate::assembly::ast::Operand::Stack;
 use crate::tacky::ast::{
     BinaryOperator as TackyBinOp, BinaryOperator, Function, Instruction as TackyInstruction,
-    UnaryOperator, Value,
+    TopLevel, UnaryOperator, Value,
 };
 
 #[derive(Debug)]
@@ -25,8 +25,13 @@ impl AssemblyCreator {
         tacky_program: &crate::tacky::ast::Program,
     ) -> anyhow::Result<Program> {
         let mut functions = vec![];
-        for function in &tacky_program.functions {
-            functions.push(self.create_func_def(function)?);
+        for top_level in &tacky_program.0 {
+            match top_level {
+                TopLevel::Function(f) => {
+                    functions.push(self.create_func_def(f)?);
+                }
+                _ => {}
+            }
         }
 
         Ok(Program::new(functions))
@@ -500,45 +505,44 @@ mod tests {
 
     #[test]
     fn creates_asm_program_with_binary_ops() {
-        let tacky_program = TackyProgram {
-            functions: vec![TackyFunctionDef {
-                name: "main".to_string(),
-                parameters: vec![],
-                body: vec![
-                    TackyInstruction::Binary {
-                        op: BinaryOperator::Add,
-                        src1: Value::IntegerConstant(1),
-                        src2: Value::IntegerConstant(2),
-                        dst: Value::Variable("tmp.0".to_string()),
-                    },
-                    TackyInstruction::Binary {
-                        op: BinaryOperator::Subtract,
-                        src1: Value::Variable("tmp.0".to_string()),
-                        src2: Value::IntegerConstant(3),
-                        dst: Value::Variable("tmp.1".to_string()),
-                    },
-                    TackyInstruction::Binary {
-                        op: BinaryOperator::Multiply,
-                        src1: Value::Variable("tmp.1".to_string()),
-                        src2: Value::IntegerConstant(4),
-                        dst: Value::Variable("tmp.2".to_string()),
-                    },
-                    TackyInstruction::Binary {
-                        op: BinaryOperator::Divide,
-                        src1: Value::Variable("tmp.2".to_string()),
-                        src2: Value::IntegerConstant(5),
-                        dst: Value::Variable("tmp.3".to_string()),
-                    },
-                    TackyInstruction::Binary {
-                        op: BinaryOperator::Remainder,
-                        src1: Value::Variable("tmp.3".to_string()),
-                        src2: Value::IntegerConstant(2),
-                        dst: Value::Variable("tmp.4".to_string()),
-                    },
-                    TackyInstruction::Return(Value::Variable("tmp.4".to_string())),
-                ],
-            }],
-        };
+        let tacky_program = TackyProgram(vec![TopLevel::Function(TackyFunctionDef {
+            name: "main".to_string(),
+            is_global: true,
+            parameters: vec![],
+            body: vec![
+                TackyInstruction::Binary {
+                    op: BinaryOperator::Add,
+                    src1: Value::IntegerConstant(1),
+                    src2: Value::IntegerConstant(2),
+                    dst: Value::Variable("tmp.0".to_string()),
+                },
+                TackyInstruction::Binary {
+                    op: BinaryOperator::Subtract,
+                    src1: Value::Variable("tmp.0".to_string()),
+                    src2: Value::IntegerConstant(3),
+                    dst: Value::Variable("tmp.1".to_string()),
+                },
+                TackyInstruction::Binary {
+                    op: BinaryOperator::Multiply,
+                    src1: Value::Variable("tmp.1".to_string()),
+                    src2: Value::IntegerConstant(4),
+                    dst: Value::Variable("tmp.2".to_string()),
+                },
+                TackyInstruction::Binary {
+                    op: BinaryOperator::Divide,
+                    src1: Value::Variable("tmp.2".to_string()),
+                    src2: Value::IntegerConstant(5),
+                    dst: Value::Variable("tmp.3".to_string()),
+                },
+                TackyInstruction::Binary {
+                    op: BinaryOperator::Remainder,
+                    src1: Value::Variable("tmp.3".to_string()),
+                    src2: Value::IntegerConstant(2),
+                    dst: Value::Variable("tmp.4".to_string()),
+                },
+                TackyInstruction::Return(Value::Variable("tmp.4".to_string())),
+            ],
+        })]);
 
         let mut assembly_creator = AssemblyCreator::new();
         let assembly_program = assembly_creator
