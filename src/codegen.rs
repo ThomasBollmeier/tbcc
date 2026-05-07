@@ -1,6 +1,4 @@
-use crate::assembly::ast::{
-    BinaryOp, ConditionCode, FuncDef, Instruction, Operand, Program, Register, UnaryOp, Visitor,
-};
+use crate::assembly::ast::{BinaryOp, ConditionCode, FuncDef, Instruction, Operand, Program, Register, StaticVar, UnaryOp, Visitor};
 use crate::semantic::symbol_table;
 
 pub struct CodeGenerator {
@@ -44,6 +42,7 @@ impl CodeGenerator {
             Operand::Register(Register::R10) => "%r10".to_string(),
             Operand::Register(Register::R11) => "%r11".to_string(),
             Operand::Stack(offset) => format!("{}(%rbp)", offset),
+            Operand::Data(label) => self.get_variable_op_name(label),
             _ => panic!("Unsupported operand type: {:?}", operand),
         }
     }
@@ -61,6 +60,7 @@ impl CodeGenerator {
             Operand::Register(Register::R10) => "%r10d".to_string(),
             Operand::Register(Register::R11) => "%r11d".to_string(),
             Operand::Stack(offset) => format!("{}(%rbp)", offset),
+            Operand::Data(label) => self.get_variable_op_name(label),
             _ => panic!("Unsupported operand type: {:?}", operand),
         }
     }
@@ -78,6 +78,7 @@ impl CodeGenerator {
             Operand::Register(Register::R10) => "%r10b".to_string(),
             Operand::Register(Register::R11) => "%r11b".to_string(),
             Operand::Stack(offset) => format!("{}(%rbp)", offset),
+            Operand::Data(label) => self.get_variable_op_name(label),
             _ => panic!("Unsupported operand type: {:?}", operand),
         }
     }
@@ -142,6 +143,26 @@ impl CodeGenerator {
             original_function_name.to_string()
         }
     }
+
+    fn get_variable_name(&self, original_name: &str) -> String {
+        if cfg!(target_os = "linux") {
+            format!("{}", original_name)
+        } else if cfg!(target_os = "macos") {
+            format!("_{}", original_name)
+        } else {
+            unreachable!()
+        }
+    }
+
+    fn get_variable_op_name(&self, original_name: &str) -> String {
+        if cfg!(target_os = "linux") {
+            format!("{}(%rip)", original_name)
+        } else if cfg!(target_os = "macos") {
+            format!("_{}(%rip)", original_name)
+        } else {
+            unreachable!()
+        }
+    }
 }
 
 impl Visitor for CodeGenerator {
@@ -159,13 +180,44 @@ impl Visitor for CodeGenerator {
     }
 
     fn enter_func_def(&mut self, func_def: &FuncDef) {
-        self.write_instruction(&format!(".globl {}", func_def.name));
+        if func_def.is_global {
+            self.write_instruction(&format!(".globl {}", func_def.name));
+        }
+        self.write_instruction(".text");
         self.write_label(&self.get_function_name(&func_def.name));
         self.write_instruction("pushq \t%rbp");
         self.write_instruction("movq \t%rsp, %rbp");
     }
 
     fn exit_func_def(&mut self, _func_def: &FuncDef) {}
+
+    fn visit_static_var(&mut self, static_var: &StaticVar) {
+        if static_var.is_global {
+            self.write_instruction(&format!(".globl {}", static_var.name));
+        }
+
+        if static_var.value != 0 {
+            self.write_instruction(".data");
+        } else {
+            self.write_instruction(".bss");
+        }
+
+        if cfg!(target_os = "linux") {
+            self.write_instruction(".align 4");
+        } else if cfg!(target_os = "macos") {
+            self.write_instruction(".balign 4");
+        } else {
+            unreachable!()
+        }
+
+        self.write_label(&self.get_variable_name(&static_var.name));
+
+        if static_var.value != 0 {
+            self.write_instruction(&format!(".long {}", static_var.value));
+        } else {
+            self.write_instruction(".zero 4");
+        }
+    }
 
     fn visit_instruction(&mut self, instruction: &Instruction) {
         match instruction {
@@ -280,6 +332,45 @@ mod tests {
             asm_code.contains("setl") || asm_code.contains("setne"),
             "Expected setcc for comparisons in ASM"
         );
+    }
+
+    #[test]
+    fn generate_asm_multiple_static_locals() {
+        let code = r#"
+            /* Multiple functions may declare static local variables
+             * with the same name; these variables have no linkage,
+             * and are distinct from each other.
+             */
+
+            int foo(void) {
+                /* 'a' is a static local variable.
+                 * its value doubles each time we call foo()
+                 */
+                static int a = 3;
+                a = a * 2;
+                return a;
+            }
+
+            int bar(void) {
+                /* 'a' is a static local variable, distinct from the
+                 * 'a' variable declared in foo.
+                 * its value increases by one each time we call bar()
+                 */
+                static int a = 4;
+                a = a + 1;
+                return a;
+            }
+
+            int main(void) {
+                return foo() + bar() + foo() + bar();
+            }
+        "#;
+
+        let assembly_program = create_assembly(code);
+        let code_generator = CodeGenerator::new();
+        let asm_code = code_generator.generate_assembly(&assembly_program);
+
+        print!("{asm_code}");
     }
 
     fn create_assembly(code: &str) -> Program {

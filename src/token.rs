@@ -2,7 +2,6 @@
 pub enum TokenType {
     Whitespace,
     LineComment,
-    BlockComment,
     Identifier,
     IntegerConstant,
     Int,

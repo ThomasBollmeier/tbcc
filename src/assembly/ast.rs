@@ -13,7 +13,7 @@ impl Program {
         for top_level in &self.top_levels {
             match top_level {
                 TopLevel::Function(func_def) => Self::walk_func_def(func_def, visitor),
-                TopLevel::StaticVariable(_) => { /* no need to walk static variables */ }
+                TopLevel::StaticVariable(static_var) => Self::walk_static_var(static_var, visitor),
             }
         }
         visitor.exit_program(self);
@@ -24,7 +24,7 @@ impl Program {
         for top_level in &mut self.top_levels {
             match top_level {
                 TopLevel::Function(func_def) => Self::walk_func_def_mut(func_def, visitor),
-                TopLevel::StaticVariable(_) => { /* no need to walk static variables */ }
+                TopLevel::StaticVariable(static_var) => Self::walk_static_var_mut(static_var, visitor),
             }
         }
         visitor.exit_program(self);
@@ -40,6 +40,10 @@ impl Program {
         visitor.exit_func_def(func_def);
     }
 
+    fn walk_static_var_mut(static_var: &mut StaticVar, visitor: &mut impl VisitorMut) {
+        visitor.visit_static_var(static_var);
+    }
+
     fn walk_instruction_mut(instruction: &mut Instruction, visitor: &mut impl VisitorMut) {
         visitor.visit_instruction(instruction);
     }
@@ -52,6 +56,10 @@ impl Program {
         }
 
         visitor.exit_func_def(func_def);
+    }
+
+    fn walk_static_var(static_var: &StaticVar, visitor: &mut impl Visitor) {
+        visitor.visit_static_var(static_var);
     }
 
     fn walk_instruction(instruction: &Instruction, visitor: &mut impl Visitor) {
@@ -179,6 +187,7 @@ pub trait Visitor {
     fn exit_program(&mut self, program: &Program) {}
     fn enter_func_def(&mut self, func_def: &FuncDef) {}
     fn exit_func_def(&mut self, func_def: &FuncDef) {}
+    fn visit_static_var(&mut self, static_var: &StaticVar) {}
     fn visit_instruction(&mut self, instruction: &Instruction) {}
 }
 
@@ -188,5 +197,6 @@ pub trait VisitorMut {
     fn exit_program(&mut self, program: &mut Program) {}
     fn enter_func_def(&mut self, func_def: &mut FuncDef) {}
     fn exit_func_def(&mut self, func_def: &mut FuncDef) {}
+    fn visit_static_var(&mut self, static_var: &mut StaticVar) {}
     fn visit_instruction(&mut self, instruction: &mut Instruction) {}
 }

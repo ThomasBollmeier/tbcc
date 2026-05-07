@@ -27,7 +27,6 @@ impl Lexer {
 
         lexer.add_token_type_full(TokenType::Whitespace, r"\s+", true, false, None);
         lexer.add_token_type_full(TokenType::LineComment, r"//.*", true, false, None);
-        lexer.add_token_type_full(TokenType::BlockComment, r"/\*.*\*/", true, true, None);
 
         lexer.add_token_type_full(
             TokenType::IntegerConstant,
@@ -116,6 +115,11 @@ impl Lexer {
         let mut remaining = code.to_string();
 
         while !remaining.is_empty() {
+            (line, column) = self.remove_block_comment(line, column, &mut remaining);
+            if remaining.is_empty() {
+                break;
+            }
+
             match self.find_max_match(&remaining) {
                 Some((token_type, lexeme, skip, value_opt)) => {
                     let curr_line = line;
@@ -152,6 +156,30 @@ impl Lexer {
         }
 
         Ok(tokens)
+    }
+
+    fn remove_block_comment(&self, line: usize, column: usize, remaining: &mut String) -> (usize, usize) {
+
+        if !remaining.starts_with("/*") {
+            return (line, column);
+        }
+
+        // Find "*/":
+        let mut block_comment: Option<String> = None;
+
+        remaining.find("*/").map(|end| {
+            // Remove the block comment
+            block_comment = Some(remaining[..end+2].to_string());
+            *remaining = remaining[end + 2..].to_string();
+        });
+
+        if block_comment.is_none() {
+            block_comment = Some(remaining.clone());
+            *remaining = "".to_string();
+        }
+
+        let block_comment = block_comment.unwrap();
+        Self::advance_position(&block_comment, line, column)
     }
 
     fn add_token_type(&mut self, token_type: TokenType, pattern: &str) {

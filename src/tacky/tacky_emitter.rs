@@ -1,10 +1,7 @@
 use super::ast::Instruction::Unary;
 use super::ast::Value::IntegerConstant;
 use super::ast::{BinaryOperator, Function, Instruction, Program, TopLevel, UnaryOperator, Value};
-use crate::ast::{
-    BinaryOp, Block, BlockItem, Expression, ForInit, FunctionDeclaration, Label, Statement,
-    UnaryOp, VarDeclaration,
-};
+use crate::ast::{BinaryOp, Block, BlockItem, Expression, ForInit, FunctionDeclaration, Label, Statement, StorageClass, UnaryOp, VarDeclaration};
 use crate::semantic::symbol_table::{IdentAttrs, InitialValue};
 use crate::semantic::{NameGeneratorRef, symbol_table};
 use anyhow::{Result, anyhow};
@@ -122,6 +119,10 @@ impl TackyEmitter {
 
     fn emit_declaration(&mut self, declaration: &VarDeclaration) -> Vec<Instruction> {
         let mut instructions = vec![];
+
+        if let Some(StorageClass::Static) = declaration.storage_class {
+            return instructions;
+        }
 
         if let Some(expr) = &declaration.init_expr {
             let init_value = self.emit_expression(expr, &mut instructions);
