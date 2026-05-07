@@ -1,10 +1,22 @@
-use crate::assembly::ast::VisitorMut;
+use crate::assembly::ast::{Operand, VisitorMut};
 
 pub struct InstructionFixer;
 
 impl InstructionFixer {
     pub fn new() -> InstructionFixer {
         InstructionFixer
+    }
+
+    fn is_memory(operand: &Operand) -> bool {
+        match operand {
+            Operand::Stack(_) => true,
+            Operand::Data(_) => true,
+            _ => false,
+        }
+    }
+
+    fn all_memory(operands: &[&Operand]) -> bool {
+        operands.iter().all(|op| Self::is_memory(*op))
     }
 }
 
@@ -19,8 +31,8 @@ impl VisitorMut for InstructionFixer {
 
         for instruction in &func_def.instructions {
             match instruction {
-                Mov { src, dst } => match (src, dst) {
-                    (Stack(_), Stack(_)) => {
+                Mov { src, dst } => {
+                    if Self::all_memory(&[src, dst]) {
                         new_instructions.push(Mov {
                             src: src.clone(),
                             dst: Register(R10),
@@ -29,12 +41,13 @@ impl VisitorMut for InstructionFixer {
                             src: Register(R10),
                             dst: dst.clone(),
                         });
+                    } else {
+                        new_instructions.push(instruction.clone())
                     }
-                    _ => new_instructions.push(instruction.clone()),
-                },
+                }
                 Binary { op, left, right } => match op {
                     Mul => {
-                        if let Stack(_) = right {
+                        if Self::is_memory(right) {
                             new_instructions.push(Mov {
                                 src: right.clone(),
                                 dst: Register(R11),
@@ -53,7 +66,7 @@ impl VisitorMut for InstructionFixer {
                         }
                     }
                     ShiftLeft | ShiftRight => {
-                        if let Stack(_) = left {
+                        if Self::is_memory(left) {
                             new_instructions.push(Mov {
                                 src: left.clone(),
                                 dst: Register(CX),
@@ -67,20 +80,19 @@ impl VisitorMut for InstructionFixer {
                             new_instructions.push(instruction.clone());
                         }
                     }
-                    Add | Sub | BitAnd | BitOr | BitXor =>  {
-                        match (left, right) {
-                            (Stack(_), Stack(_)) => {
-                                new_instructions.push(Mov {
-                                    src: left.clone(),
-                                    dst: Register(R10),
-                                });
-                                new_instructions.push(Binary {
-                                    op: op.clone(),
-                                    left: Register(R10),
-                                    right: right.clone(),
-                                });
-                            }
-                            _ => new_instructions.push(instruction.clone()),
+                    Add | Sub | BitAnd | BitOr | BitXor => {
+                        if Self::all_memory(&[left, right]) {
+                            new_instructions.push(Mov {
+                                src: left.clone(),
+                                dst: Register(R10),
+                            });
+                            new_instructions.push(Binary {
+                                op: op.clone(),
+                                left: Register(R10),
+                                right: right.clone(),
+                            });
+                        } else {
+                            new_instructions.push(instruction.clone());
                         }
                     }
                 },
@@ -94,20 +106,7 @@ impl VisitorMut for InstructionFixer {
                     }
                     _ => new_instructions.push(instruction.clone()),
                 },
-                Cmp {
-                    op1,
-                    op2
-                } => match (op1, op2) {
-                    (Stack(_), Stack(_)) => {
-                        new_instructions.push(Mov {
-                            src: op1.clone(),
-                            dst: Register(R10),
-                        });
-                        new_instructions.push(Cmp {
-                            op1: Register(R10),
-                            op2: op2.clone(),
-                        });
-                    }
+                Cmp { op1, op2 } => match (op1, op2) {
                     (_, Immediate(_)) => {
                         new_instructions.push(Mov {
                             src: op2.clone(),
@@ -118,8 +117,21 @@ impl VisitorMut for InstructionFixer {
                             op2: Register(R11),
                         });
                     }
-                    _ => new_instructions.push(instruction.clone()),
-                }
+                    _ => {
+                        if Self::all_memory(&[op1, op2]) {
+                            new_instructions.push(Mov {
+                                src: op1.clone(),
+                                dst: Register(R10),
+                            });
+                            new_instructions.push(Cmp {
+                                op1: Register(R10),
+                                op2: op2.clone(),
+                            });
+                        } else {
+                            new_instructions.push(instruction.clone());
+                        }
+                    }
+                },
                 _ => new_instructions.push(instruction.clone()),
             }
         }
@@ -131,15 +143,24 @@ impl VisitorMut for InstructionFixer {
 #[cfg(test)]
 mod tests {
     use super::InstructionFixer;
+    use crate::assembly::ast::TopLevel::Function;
     use crate::assembly::ast::{FuncDef, Instruction, Operand, Program, Register, UnaryOp};
+    use crate::assembly::pseudo_reg_replacer::PseudoRegReplacer;
 
     fn apply_fixer(instructions: Vec<Instruction>) -> Vec<Instruction> {
-        let mut program = Program::new(vec![FuncDef::new("main".to_string(), instructions)]);
-        let mut pseudo_reg_replacer = crate::assembly::pseudo_reg_replacer::PseudoRegReplacer::new();
+        let func_def = FuncDef::new("main".to_string(), true, instructions);
+        let mut program = Program::new(vec![Function(func_def)]);
+        let mut pseudo_reg_replacer = PseudoRegReplacer::new();
         program.walk_mut(&mut pseudo_reg_replacer);
         let mut fixer = InstructionFixer::new();
         program.walk_mut(&mut fixer);
-        program.functions[0].instructions.clone()
+
+        let function = &program.top_levels[0];
+        if let Function(func) = function {
+            func.instructions.clone()
+        } else {
+            unreachable!()
+        }
     }
 
     #[test]

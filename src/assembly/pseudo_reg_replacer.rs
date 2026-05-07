@@ -1,5 +1,7 @@
-use std::collections::HashMap;
 use crate::assembly::ast::{FuncDef, Instruction, Operand, VisitorMut};
+use crate::semantic::symbol_table;
+use crate::semantic::symbol_table::IdentAttrs;
+use std::collections::HashMap;
 
 pub struct PseudoRegReplacer {
     var_map: HashMap<String, i32>,
@@ -19,6 +21,8 @@ impl PseudoRegReplacer {
             Operand::PseudoReg(name) => {
                 if let Some(offset) = self.var_map.get(name) {
                     Some(Operand::Stack(*offset))
+                } else if Self::is_static_var(name) {
+                    Some(Operand::Data(name.clone()))
                 } else {
                     self.last_offset -= 4; // Assuming 4 bytes per variable
                     self.var_map.insert(name.clone(), self.last_offset);
@@ -26,6 +30,19 @@ impl PseudoRegReplacer {
                 }
             }
             _ => None,
+        }
+    }
+
+    fn is_static_var(name: &str) -> bool {
+        let entry = symbol_table::get(name);
+        match entry {
+            Some(entry) => {
+                match entry.attrs {
+                    IdentAttrs::Static {..} => true,
+                    _ => false,
+                }
+            },
+            _ => false,
         }
     }
 }
@@ -104,14 +121,21 @@ impl VisitorMut for PseudoRegReplacer {
 #[cfg(test)]
 mod tests {
     use super::PseudoRegReplacer;
+    use crate::assembly::ast::TopLevel::Function;
     use crate::assembly::ast::{FuncDef, Instruction, Operand, Program, Register, UnaryOp};
 
     fn apply_replacer(instructions: Vec<Instruction>) -> Vec<Instruction> {
-        let mut program = Program::new(vec![FuncDef::new("main".to_string(), instructions)]);
+        let func_def = FuncDef::new("main".to_string(), true, instructions);
+        let mut program = Program::new(vec![Function(func_def)]);
         let mut replacer = PseudoRegReplacer::new();
         program.walk_mut(&mut replacer);
 
-        let instructions = program.functions[0].instructions.clone();
+        let function = &program.top_levels[0];
+        let instructions = if let Function(func) = function {
+            func.instructions.clone()
+        } else {
+            unreachable!()
+        };
 
         instructions
     }
@@ -176,7 +200,6 @@ mod tests {
             }
             _ => panic!("expected unary instruction"),
         }
-
     }
 
     #[test]

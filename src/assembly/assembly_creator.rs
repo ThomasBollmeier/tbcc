@@ -1,11 +1,12 @@
 use crate::assembly::ast::Operand::Stack;
 use crate::assembly::ast::Register::{CX, DI, DX, R8, R9, SI};
+use crate::assembly::ast::{StaticVar, TopLevel as TopLevelAsm};
 use crate::assembly::ast::{
     ConditionCode, FuncDef, Instruction, Operand, Program, Register, UnaryOp,
 };
 use crate::tacky::ast::{
     BinaryOperator as TackyBinOp, BinaryOperator, Function, Instruction as TackyInstruction,
-    TopLevel, UnaryOperator, Value,
+    StaticVariable, TopLevel, UnaryOperator, Value,
 };
 
 #[derive(Debug)]
@@ -24,17 +25,34 @@ impl AssemblyCreator {
         &mut self,
         tacky_program: &crate::tacky::ast::Program,
     ) -> anyhow::Result<Program> {
-        let mut functions = vec![];
+        let mut top_levels_asm = vec![];
         for top_level in &tacky_program.0 {
             match top_level {
                 TopLevel::Function(f) => {
-                    functions.push(self.create_func_def(f)?);
+                    let func_def_asm = self.create_func_def(f)?;
+                    top_levels_asm.push(TopLevelAsm::Function(func_def_asm));
                 }
-                _ => {}
+                TopLevel::StaticVariable(static_var) => {
+                    let static_var_asm = self.create_static_var(static_var)?;
+                    top_levels_asm.push(TopLevelAsm::StaticVariable(static_var_asm));
+                }
             }
         }
 
-        Ok(Program::new(functions))
+        Ok(Program::new(top_levels_asm))
+    }
+
+    fn create_static_var(&mut self, static_var: &StaticVariable) -> anyhow::Result<StaticVar> {
+        let value = match static_var.initial_value {
+            Value::IntegerConstant(i) => i,
+            _ => return Err(anyhow::anyhow!("Not an integer constant.")),
+        };
+
+        Ok(StaticVar {
+            name: static_var.name.clone(),
+            is_global: static_var.is_global,
+            value,
+        })
     }
 
     fn create_func_def(&mut self, func_def: &Function) -> anyhow::Result<FuncDef> {
@@ -57,7 +75,7 @@ impl AssemblyCreator {
 
         instructions.extend(self.create_instructions(&func_def.body)?);
 
-        Ok(FuncDef::new(name, instructions))
+        Ok(FuncDef::new(name, func_def.is_global, instructions))
     }
 
     fn create_instructions(
@@ -282,7 +300,7 @@ impl AssemblyCreator {
         instructions.push(Cdq);
         instructions.push(Idiv(src2_op));
         instructions.push(Mov {
-            src: Operand::Register(Register::DX),
+            src: Operand::Register(DX),
             dst: dst_op,
         });
     }
@@ -549,7 +567,11 @@ mod tests {
             .create_program(&tacky_program)
             .expect("Failed to create assembly program");
 
-        let main_func = &assembly_program.functions[0];
+        let main_func = if let TopLevelAsm::Function(func) = &assembly_program.top_levels[0] {
+            func
+        } else {
+            panic!("Expected function");
+        };
 
         let instructions = &main_func.instructions;
         assert_eq!(instructions.len(), 16);
@@ -637,7 +659,7 @@ mod tests {
         assert!(matches!(
             &instructions[13],
             AsmInstruction::Mov {
-                src: AsmOperand::Register(AsmRegister::DX),
+                src: AsmOperand::Register(DX),
                 dst: AsmOperand::PseudoReg(name)
             } if name == "tmp.4"
         ));

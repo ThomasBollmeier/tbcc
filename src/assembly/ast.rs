@@ -1,25 +1,31 @@
 #[derive(Debug)]
 pub struct Program {
-    pub functions: Vec<FuncDef>,
+    pub top_levels: Vec<TopLevel>,
 }
 
 impl Program {
-    pub fn new(functions: Vec<FuncDef>) -> Self {
-        Self { functions }
+    pub fn new(top_levels: Vec<TopLevel>) -> Self {
+        Self { top_levels }
     }
 
     pub fn walk(&self, visitor: &mut impl Visitor) {
         visitor.enter_program(self);
-        for function in &self.functions {
-            Self::walk_func_def(function, visitor);
+        for top_level in &self.top_levels {
+            match top_level {
+                TopLevel::Function(func_def) => Self::walk_func_def(func_def, visitor),
+                TopLevel::StaticVariable(_) => { /* no need to walk static variables */ }
+            }
         }
         visitor.exit_program(self);
     }
 
     pub fn walk_mut(&mut self, visitor: &mut impl VisitorMut) {
         visitor.enter_program(self);
-        for function in &mut self.functions {
-            Self::walk_func_def_mut(function, visitor);
+        for top_level in &mut self.top_levels {
+            match top_level {
+                TopLevel::Function(func_def) => Self::walk_func_def_mut(func_def, visitor),
+                TopLevel::StaticVariable(_) => { /* no need to walk static variables */ }
+            }
         }
         visitor.exit_program(self);
     }
@@ -54,20 +60,35 @@ impl Program {
 }
 
 #[derive(Debug)]
+pub enum TopLevel {
+    Function(FuncDef),
+    StaticVariable(StaticVar),
+}
+
+#[derive(Debug)]
 pub struct FuncDef {
     pub name: String,
+    pub is_global: bool,
     pub instructions: Vec<Instruction>,
     pub stack_frame_size: usize,
 }
 
 impl FuncDef {
-    pub fn new(name: String, instructions: Vec<Instruction>) -> Self {
+    pub fn new(name: String, is_global: bool, instructions: Vec<Instruction>) -> Self {
         Self {
             name,
+            is_global,
             instructions,
             stack_frame_size: 0, // filled by pseudo_reg_replacer
         }
     }
+}
+
+#[derive(Debug)]
+pub struct StaticVar {
+    pub name: String,
+    pub is_global: bool,
+    pub value: i32,
 }
 
 #[derive(Debug, Clone)]
@@ -117,6 +138,7 @@ pub enum Operand {
     Immediate(i32),
     Register(Register),
     PseudoReg(String),
+    Data(String),
     Stack(i32),
 }
 
