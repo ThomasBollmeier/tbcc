@@ -1,6 +1,6 @@
 [package]
 name = "tbcc"
-version = "0.1.10"
+version = "0.11.0"
 edition = "2024"
 authors = ["Thomas Bollmeier"]
 

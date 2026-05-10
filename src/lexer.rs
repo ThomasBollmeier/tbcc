@@ -27,7 +27,6 @@ impl Lexer {
 
         lexer.add_token_type_full(TokenType::Whitespace, r"\s+", true, false, None);
         lexer.add_token_type_full(TokenType::LineComment, r"//.*", true, false, None);
-
         lexer.add_token_type_full(
             TokenType::IntegerConstant,
             r"\d+\b",
@@ -36,6 +35,17 @@ impl Lexer {
             Some(|lexeme| {
                 let value = lexeme.parse::<i32>().unwrap();
                 TokenValue::Integer(value)
+            }),
+        );
+        lexer.add_token_type_full(
+            TokenType::LongConstant,
+            r"\d+[lL]\b",
+            false,
+            false,
+            Some(|lexeme| {
+                let lexeme = &lexeme[..lexeme.len() - 1]; // Remove the trailing 'l' or 'L'
+                let value = lexeme.parse::<i64>().unwrap();
+                TokenValue::Long(value)
             }),
         );
 
@@ -85,6 +95,7 @@ impl Lexer {
         lexer.add_token_type(TokenType::Colon, r":");
 
         lexer.keywords.insert("int".to_string(), TokenType::Int);
+        lexer.keywords.insert("long".to_string(), TokenType::Long);
         lexer.keywords.insert("void".to_string(), TokenType::Void);
         lexer
             .keywords
@@ -589,5 +600,22 @@ int main(void) {
         assert_eq!(tokens[13].value, Some(TokenValue::Integer(0)));
         assert_eq!(tokens[14].token_type, TokenType::Semicolon);
         assert_eq!(tokens[15].token_type, TokenType::RightBrace);
+    }
+
+    #[test]
+    fn scan_long() {
+        let lexer = Lexer::new();
+        let code = "long answer = 42L;";
+
+        let tokens = lexer.scan_tokens(code).unwrap();
+        assert_eq!(tokens.len(), 5);
+        assert_eq!(tokens[0].token_type, TokenType::Long);
+        assert_eq!(tokens[1].token_type, TokenType::Identifier);
+        assert_eq!(tokens[1].lexeme, "answer");
+        assert_eq!(tokens[2].token_type, TokenType::Assign);
+        assert_eq!(tokens[3].token_type, TokenType::LongConstant);
+        assert_eq!(tokens[3].value, Some(TokenValue::Long(42)));
+        assert_eq!(tokens[3].lexeme, "42L");
+        assert_eq!(tokens[4].token_type, TokenType::Semicolon);
     }
 }
