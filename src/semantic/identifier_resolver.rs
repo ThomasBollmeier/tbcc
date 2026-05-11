@@ -410,7 +410,7 @@ mod tests {
         let result = resolve_code(
             r#"
             int main(void) {
-                int doit();
+                int doit(void);
                 if (1) {
                     int doit = 5;
                     return doit;

@@ -154,7 +154,7 @@ enum TargetId {
 mod tests {
     use anyhow::anyhow;
     use super::*;
-    use crate::ast::{Block, BlockItem, Declaration, Expression, FunctionDeclaration, Label, Program, Statement};
+    use crate::ast::{Block, BlockItem, Declaration, Expression, FunctionDeclaration, Label, Program, Statement, Type};
     use crate::lexer::Lexer;
     use crate::parser::Parser;
 
@@ -503,6 +503,7 @@ mod tests {
             vec![],
             Some(Block::new(vec![BlockItem::Statement(statement)])),
             None,
+            Type::Int,
         )));
         program
     }

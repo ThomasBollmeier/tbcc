@@ -21,6 +21,7 @@ pub struct FunctionDeclaration {
     pub parameters: Vec<String>,
     pub body: Option<Block>,
     pub storage_class: Option<StorageClass>,
+    pub func_type: Type,
 }
 
 impl FunctionDeclaration {
@@ -29,12 +30,14 @@ impl FunctionDeclaration {
         parameters: Vec<String>,
         body: Option<Block>,
         storage_class: Option<StorageClass>,
+        func_type: Type,
     ) -> Self {
         FunctionDeclaration {
             name,
             parameters,
             body,
             storage_class,
+            func_type,
         }
     }
 }
@@ -44,6 +47,7 @@ pub struct VarDeclaration {
     pub name: String,
     pub init_expr: Option<Expression>,
     pub storage_class: Option<StorageClass>,
+    pub var_type: Type,
 }
 
 impl VarDeclaration {
@@ -51,13 +55,25 @@ impl VarDeclaration {
         name: String,
         init_expr: Option<Expression>,
         storage_class: Option<StorageClass>,
+        var_type: Type,
     ) -> Self {
         VarDeclaration {
             name,
             init_expr,
             storage_class,
+            var_type,
         }
     }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum Type {
+    Int,
+    Long,
+    Function {
+        return_type: Box<Type>,
+        param_types: Vec<Type>,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -164,6 +180,11 @@ pub enum ForInit {
 #[derive(Debug, Clone)]
 pub enum Expression {
     IntegerConstant(i32),
+    LongConstant(i64),
+    Cast {
+        expr: Box<Expression>,
+        target_type: Type,
+    },
     Var(String),
     FuncCall {
         name: String,

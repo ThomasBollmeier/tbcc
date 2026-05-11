@@ -3,14 +3,77 @@ use anyhow::Result;
 use fancy_regex::Regex;
 use std::collections::HashMap;
 
-pub type ValueFn = fn(lexeme: &str) -> TokenValue;
+trait TokenDerivation {
+    fn derive_token_type(&self, lexeme: &str) -> Result<TokenType>;
+    fn derive_token_value(&self, lexeme: &str) -> Result<Option<TokenValue>>;
+}
 
-#[derive(Debug, Clone)]
+struct ConstantTokenDerivation {
+    token_type: TokenType,
+}
+
+impl ConstantTokenDerivation {
+    fn new(token_type: TokenType) -> ConstantTokenDerivation {
+        ConstantTokenDerivation { token_type }
+    }
+}
+
+impl TokenDerivation for ConstantTokenDerivation {
+    fn derive_token_type(&self, _: &str) -> Result<TokenType> {
+        Ok(self.token_type.clone())
+    }
+
+    fn derive_token_value(&self, _: &str) -> Result<Option<TokenValue>> {
+        Ok(None)
+    }
+}
+
+impl Into<Box<dyn TokenDerivation>> for TokenType {
+    fn into(self) -> Box<dyn TokenDerivation> {
+        Box::new(ConstantTokenDerivation::new(self))
+    }
+}
+
+struct IntLongTokenDerivation;
+
+impl TokenDerivation for IntLongTokenDerivation {
+    fn derive_token_type(&self, lexeme: &str) -> Result<TokenType> {
+        match self.derive_token_value(lexeme)? {
+            Some(TokenValue::Integer(_)) => Ok(TokenType::IntegerConstant),
+            Some(TokenValue::Long(_)) => Ok(TokenType::LongConstant),
+            None => Err(anyhow::anyhow!(
+                "{} is not a valid int or long literal",
+                lexeme
+            )),
+        }
+    }
+
+    fn derive_token_value(&self, lexeme: &str) -> Result<Option<TokenValue>> {
+        if lexeme.ends_with("l") || lexeme.ends_with("L") {
+            let lexeme = &lexeme[..lexeme.len() - 1]; // Remove the trailing 'l' or 'L'
+            let long_val = lexeme.parse::<i64>()?;
+            Ok(Some(TokenValue::Long(long_val)))
+        } else {
+            let int_val = lexeme.parse::<i32>();
+            if int_val.is_ok() {
+                return Ok(Some(TokenValue::Integer(int_val?)));
+            }
+            let long_val = lexeme.parse::<i64>()?;
+            Ok(Some(TokenValue::Long(long_val)))
+        }
+    }
+}
+
+impl Into<Box<dyn TokenDerivation>> for IntLongTokenDerivation {
+    fn into(self) -> Box<dyn TokenDerivation> {
+        Box::new(IntLongTokenDerivation)
+    }
+}
+
 struct TokenTypeData {
-    pub token_type: TokenType,
+    pub token_derivation: Box<dyn TokenDerivation>,
     pub regex: Regex,
     pub skip: bool,
-    pub value_fn_opt: Option<ValueFn>,
 }
 
 pub struct Lexer {
@@ -25,29 +88,9 @@ impl Lexer {
             keywords: HashMap::new(),
         };
 
-        lexer.add_token_type_full(TokenType::Whitespace, r"\s+", true, false, None);
-        lexer.add_token_type_full(TokenType::LineComment, r"//.*", true, false, None);
-        lexer.add_token_type_full(
-            TokenType::IntegerConstant,
-            r"\d+\b",
-            false,
-            false,
-            Some(|lexeme| {
-                let value = lexeme.parse::<i32>().unwrap();
-                TokenValue::Integer(value)
-            }),
-        );
-        lexer.add_token_type_full(
-            TokenType::LongConstant,
-            r"\d+[lL]\b",
-            false,
-            false,
-            Some(|lexeme| {
-                let lexeme = &lexeme[..lexeme.len() - 1]; // Remove the trailing 'l' or 'L'
-                let value = lexeme.parse::<i64>().unwrap();
-                TokenValue::Long(value)
-            }),
-        );
+        lexer.add_token_type_full(TokenType::Whitespace, r"\s+", true, false);
+        lexer.add_token_type_full(TokenType::LineComment, r"//.*", true, false);
+        lexer.add_token_type_full(IntLongTokenDerivation, r"\d+[lL]?\b", false, false);
 
         lexer.add_token_type(TokenType::Identifier, r"[a-zA-Z_][a-zA-Z0-9_]*\b");
         lexer.add_token_type(TokenType::LeftParen, r"\(");
@@ -110,11 +153,19 @@ impl Lexer {
         lexer
             .keywords
             .insert("continue".to_string(), TokenType::Continue);
-        lexer.keywords.insert("switch".to_string(), TokenType::Switch);
+        lexer
+            .keywords
+            .insert("switch".to_string(), TokenType::Switch);
         lexer.keywords.insert("case".to_string(), TokenType::Case);
-        lexer.keywords.insert("default".to_string(), TokenType::Default);
-        lexer.keywords.insert("static".to_string(), TokenType::Static);
-        lexer.keywords.insert("extern".to_string(), TokenType::Extern);
+        lexer
+            .keywords
+            .insert("default".to_string(), TokenType::Default);
+        lexer
+            .keywords
+            .insert("static".to_string(), TokenType::Static);
+        lexer
+            .keywords
+            .insert("extern".to_string(), TokenType::Extern);
 
         lexer
     }
@@ -169,8 +220,12 @@ impl Lexer {
         Ok(tokens)
     }
 
-    fn remove_block_comment(&self, line: usize, column: usize, remaining: &mut String) -> (usize, usize) {
-
+    fn remove_block_comment(
+        &self,
+        line: usize,
+        column: usize,
+        remaining: &mut String,
+    ) -> (usize, usize) {
         if !remaining.starts_with("/*") {
             return (line, column);
         }
@@ -180,7 +235,7 @@ impl Lexer {
 
         remaining.find("*/").map(|end| {
             // Remove the block comment
-            block_comment = Some(remaining[..end+2].to_string());
+            block_comment = Some(remaining[..end + 2].to_string());
             *remaining = remaining[end + 2..].to_string();
         });
 
@@ -193,17 +248,20 @@ impl Lexer {
         Self::advance_position(&block_comment, line, column)
     }
 
-    fn add_token_type(&mut self, token_type: TokenType, pattern: &str) {
-        self.add_token_type_full(token_type, pattern, false, false, None);
+    fn add_token_type<T: Into<Box<dyn TokenDerivation>>>(
+        &mut self,
+        token_derivation: T,
+        pattern: &str,
+    ) {
+        self.add_token_type_full(token_derivation, pattern, false, false);
     }
 
-    fn add_token_type_full(
+    fn add_token_type_full<T: Into<Box<dyn TokenDerivation>>>(
         &mut self,
-        token_type: TokenType,
+        token_derivation: T,
         pattern: &str,
         skip: bool,
         multi_line: bool,
-        value_fn_opt: Option<ValueFn>,
     ) {
         let mut pattern = if pattern.starts_with("^") {
             pattern.to_string()
@@ -218,10 +276,9 @@ impl Lexer {
         let regex = Regex::new(&pattern).unwrap();
 
         let token_type_data = TokenTypeData {
-            token_type,
+            token_derivation: token_derivation.into(),
             regex,
             skip,
-            value_fn_opt,
         };
         self.token_types.push(token_type_data);
     }
@@ -252,15 +309,23 @@ impl Lexer {
                     if max_match.is_none()
                         || matched_str.len() > max_match.as_ref().unwrap().1.len()
                     {
-                        let value_opt = token_type_data
-                            .value_fn_opt
-                            .map(|value_fn| value_fn(&matched_str));
-                        max_match = Some((
-                            token_type_data.token_type.clone(),
-                            matched_str,
-                            token_type_data.skip,
-                            value_opt,
-                        ));
+                        let token_type = match token_type_data
+                            .token_derivation
+                            .derive_token_type(&matched_str)
+                        {
+                            Ok(token_type) => token_type,
+                            Err(_) => continue,
+                        };
+                        let value_opt = match token_type_data
+                            .token_derivation
+                            .derive_token_value(&matched_str)
+                        {
+                            Ok(value_opt) => value_opt,
+                            Err(_) => continue,
+                        };
+
+                        max_match =
+                            Some((token_type, matched_str, token_type_data.skip, value_opt));
                     }
                 }
             }

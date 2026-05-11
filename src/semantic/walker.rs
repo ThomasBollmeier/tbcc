@@ -185,6 +185,13 @@ fn walk_expression(expr: &mut Expression, walker: &mut impl WalkerMut) -> Result
 
     match expr {
         IntegerConstant(_) => {}
+        LongConstant(_) => {}
+        Cast {
+            target_type: _,
+            expr,
+        } => {
+            walk_expression(expr, walker)?;
+        }
         Var(_) => {}
         FuncCall {args, ..} => {
             for arg in args {

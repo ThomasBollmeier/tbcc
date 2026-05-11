@@ -439,6 +439,7 @@ impl TackyEmitter {
             Expression::FuncCall { name, args } => {
                 self.emit_func_call_expr(name, args, instructions)
             }
+            _ => unimplemented!("Expression type {:?} not implemented in emitter", expr),
         }
     }
 

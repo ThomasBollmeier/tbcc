@@ -1,7 +1,7 @@
 use crate::ast::Statement::{For, IfStatement, Return, SwitchStatement};
 use crate::ast::{
     Associativity, BinaryOp, Block, BlockItem, Declaration, Expression, ForInit,
-    FunctionDeclaration, Label, Program, Statement, StorageClass, UnaryOp, VarDeclaration,
+    FunctionDeclaration, Label, Program, Statement, StorageClass, Type, UnaryOp, VarDeclaration,
 };
 use crate::token::{Token, TokenStream, TokenType, TokenValue};
 use anyhow::{Result, anyhow};
@@ -51,32 +51,37 @@ impl Parser {
 
         match next_token.token_type {
             TokenType::LeftParen => {
-                let func_decl = self.function_declaration(stream, name, storage_class)?;
+                let return_type = Self::type_from_specifiers(&specifiers)?;
+                let func_decl =
+                    self.function_declaration(stream, name, storage_class, return_type)?;
                 Ok(Declaration::FunctionDecl(func_decl))
             }
             _ => {
-                let var_decl = self.variable_declaration(stream, name, storage_class)?;
+                let var_type = Self::type_from_specifiers(&specifiers)?;
+                let var_decl = self.variable_declaration(stream, name, storage_class, var_type)?;
                 Ok(Declaration::VarDecl(var_decl))
             }
         }
     }
 
-    fn specifiers(&self, stream: &mut TokenStream) -> Result<HashSet<TokenType>> {
-        let allowed_token_types: HashSet<TokenType> =
-            HashSet::from_iter([TokenType::Int, TokenType::Extern, TokenType::Static]);
-        let mut specifiers = HashSet::new();
-
-        while let Some(token) = stream.peek() {
-            if !allowed_token_types.contains(&token.token_type) {
-                break;
-            }
-            if specifiers.contains(&token.token_type) {
-                return Err(anyhow!("duplicate specifier {}", token.lexeme));
-            }
-            specifiers.insert(token.token_type.clone());
-            stream.advance();
+    fn type_from_specifiers(specifiers: &HashSet<TokenType>) -> Result<Type> {
+        if specifiers.contains(&TokenType::Long) {
+            Ok(Type::Long)
+        } else if specifiers.contains(&TokenType::Int) {
+            Ok(Type::Int)
+        } else {
+            Err(anyhow!("Unexpected token type in specifiers"))
         }
+    }
 
+    fn specifiers(&self, stream: &mut TokenStream) -> Result<HashSet<TokenType>> {
+        let allowed_token_types: HashSet<TokenType> = HashSet::from_iter([
+            TokenType::Int,
+            TokenType::Long,
+            TokenType::Extern,
+            TokenType::Static,
+        ]);
+        let specifiers = self.get_specifiers(stream, &allowed_token_types)?;
         let num_specifiers = specifiers.len();
 
         match num_specifiers {
@@ -89,7 +94,7 @@ impl Parser {
                     ));
                 }
             }
-            2 => {
+            2 | 3 => {
                 if specifiers.contains(&TokenType::Static)
                     && specifiers.contains(&TokenType::Extern)
                 {
@@ -104,51 +109,94 @@ impl Parser {
         Ok(specifiers)
     }
 
+    fn type_specifiers(&self, stream: &mut TokenStream) -> Result<HashSet<TokenType>> {
+        let allowed_token_types: HashSet<TokenType> =
+            HashSet::from_iter([TokenType::Int, TokenType::Long]);
+        let specifiers = self.get_specifiers(stream, &allowed_token_types)?;
+
+        Ok(specifiers)
+    }
+
+    fn get_specifiers(
+        &self,
+        stream: &mut TokenStream,
+        allowed_token_types: &HashSet<TokenType>,
+    ) -> Result<HashSet<TokenType>> {
+        let mut specifiers = HashSet::new();
+
+        while let Some(token) = stream.peek() {
+            if !allowed_token_types.contains(&token.token_type) {
+                break;
+            }
+            if specifiers.contains(&token.token_type) {
+                return Err(anyhow!("duplicate specifier {}", token.lexeme));
+            }
+            specifiers.insert(token.token_type.clone());
+            stream.advance();
+        }
+
+        Ok(specifiers)
+    }
+
     fn function_declaration(
         &self,
         stream: &mut TokenStream,
         name: String,
         storage_class: Option<StorageClass>,
+        return_type: Type,
     ) -> Result<FunctionDeclaration> {
         self.expect(stream, TokenType::LeftParen)?;
+        let mut void_encountered = false;
+        let mut comma_encountered = false;
         let mut parameters = vec![];
+        let mut param_types = vec![];
+
         loop {
             let token = stream
                 .peek()
-                .ok_or_else(|| anyhow!("Unexpected end of input in parameter list"))?;
+                .ok_or_else(|| anyhow!("Unexpected end of input in parameter list"))?
+                .clone();
 
             match token.token_type {
                 TokenType::Void => {
                     if parameters.is_empty() {
                         stream.advance();
+                        void_encountered = true;
                         break;
                     } else {
                         return Err(anyhow!("Unexpected 'void' in parameter list"));
                     }
-                }
-                TokenType::Int => {
-                    if !parameters.is_empty() {
-                        return Err(anyhow!("Unexpected 'int' in parameter list"));
-                    }
-                    stream.advance();
-                    let param_name_token = self.expect(stream, TokenType::Identifier)?;
-                    parameters.push(param_name_token.lexeme);
                 }
                 TokenType::Comma => {
                     if parameters.is_empty() {
                         return Err(anyhow!("Unexpected ',' in parameter list"));
                     }
                     stream.advance();
-                    self.expect(stream, TokenType::Int)?;
-                    let param_name_token = self.expect(stream, TokenType::Identifier)?;
-                    parameters.push(param_name_token.lexeme);
+                    comma_encountered = true;
+                    continue;
                 }
                 TokenType::RightParen => {
                     break;
                 }
-                _ => return Err(anyhow!("Unexpected token {:?} in parameter list", token)),
+                _ => {
+                    comma_encountered = false;
+                    let param_type_specifiers = self.type_specifiers(stream)?;
+                    let param_type = Self::type_from_specifiers(&param_type_specifiers)?;
+                    param_types.push(param_type);
+                    let param_name_token = self.expect(stream, TokenType::Identifier)?;
+                    parameters.push(param_name_token.lexeme);
+                }
             }
         }
+
+        if comma_encountered {
+            return Err(anyhow!("trailing comma in function declaration"));
+        }
+
+        if parameters.is_empty() && !void_encountered {
+            return Err(anyhow!("Unexpected ')' in parameter list"));
+        }
+
         self.expect(stream, TokenType::RightParen)?;
 
         let next_token = stream
@@ -163,11 +211,17 @@ impl Parser {
             _ => Some(self.block(stream)?),
         };
 
+        let func_type = Type::Function {
+            return_type: Box::new(return_type),
+            param_types,
+        };
+
         Ok(FunctionDeclaration::new(
             name,
             parameters,
             body,
             storage_class,
+            func_type,
         ))
     }
 
@@ -179,7 +233,7 @@ impl Parser {
         while let Some(token) = stream.peek() {
             match token.token_type {
                 TokenType::RightBrace => break,
-                TokenType::Int | TokenType::Static | TokenType::Extern => {
+                TokenType::Int | TokenType::Long | TokenType::Static | TokenType::Extern => {
                     let declaration = self.declaration(stream)?;
                     match declaration {
                         Declaration::FunctionDecl(func_decl) => {
@@ -206,6 +260,7 @@ impl Parser {
         stream: &mut TokenStream,
         name: String,
         storage_class: Option<StorageClass>,
+        var_type: Type,
     ) -> Result<VarDeclaration> {
         let init_expr = if let Some(token) = stream.peek() {
             if token.token_type == TokenType::Assign {
@@ -220,7 +275,12 @@ impl Parser {
 
         self.expect(stream, TokenType::Semicolon)?;
 
-        Ok(VarDeclaration::new(name, init_expr, storage_class))
+        Ok(VarDeclaration::new(
+            name,
+            init_expr,
+            storage_class,
+            var_type,
+        ))
     }
 
     fn statement(&self, stream: &mut TokenStream) -> Result<Statement> {
@@ -427,7 +487,9 @@ impl Parser {
             .ok_or_else(|| anyhow!("Unexpected end of input in for-loop initializer"))?;
 
         let for_init = match token.token_type {
-            TokenType::Int => self.for_init_declaration(stream)?,
+            TokenType::Int | TokenType::Long | TokenType::Extern | TokenType::Static => {
+                self.for_init_declaration(stream)?
+            }
             TokenType::Semicolon => {
                 self.expect(stream, TokenType::Semicolon)?;
                 ForInit::InitExpression(None)
@@ -443,9 +505,14 @@ impl Parser {
     }
 
     fn for_init_declaration(&self, stream: &mut TokenStream) -> Result<ForInit> {
-        self.expect(stream, TokenType::Int)?;
-        let name = self.expect(stream, TokenType::Identifier)?.lexeme;
-        let var_decl = self.variable_declaration(stream, name, None)?;
+        let var_decl = match self.declaration(stream)? {
+            Declaration::VarDecl(var_decl) => var_decl,
+            _ => {
+                return Err(anyhow!(
+                    "Expected variable declaration in for-loop initializer"
+                ));
+            }
+        };
 
         Ok(ForInit::InitDeclaration(var_decl))
     }
@@ -642,6 +709,13 @@ impl Parser {
                     return Err(anyhow!("Expected integer constant value"));
                 }
             }
+            TokenType::LongConstant => {
+                if let Some(TokenValue::Long(value)) = token.value {
+                    Expression::LongConstant(value)
+                } else {
+                    return Err(anyhow!("Expected long integer constant value"));
+                }
+            }
             TokenType::Identifier => {
                 let name = token.lexeme.clone();
                 let is_func_call = if let Some(next_token) = stream.peek() {
@@ -680,9 +754,22 @@ impl Parser {
                 }
             }
             TokenType::LeftParen => {
-                let expr = self.expression(stream, 0)?;
-                self.expect(stream, TokenType::RightParen)?;
-                expr
+                let type_specifiers = self.type_specifiers(stream)?;
+                if !type_specifiers.is_empty() {
+                    // Cast expresssion
+                    let target_type = Self::type_from_specifiers(&type_specifiers)?;
+                    self.expect(stream, TokenType::RightParen)?;
+                    let expr = self.factor(stream)?;
+                    Expression::Cast {
+                        expr: Box::new(expr),
+                        target_type,
+                    }
+                } else {
+                    // Grouping:
+                    let expr = self.expression(stream, 0)?;
+                    self.expect(stream, TokenType::RightParen)?;
+                    expr
+                }
             }
             _ => return Err(anyhow!("Unexpected token {:?}", token)),
         };
@@ -1077,6 +1164,117 @@ mod tests {
 
             int main(void) {
                 return foo() + bar() + foo() + bar();
+            }
+        "#;
+
+        parse_code(code, true);
+    }
+
+    #[test]
+    fn parse_long_types_and_casts() {
+        let code = r#"
+
+        static long int answer = 42L;
+
+        long find_answer(long a, long int b) {
+            return a + b;
+        }
+        "#;
+
+        parse_code(code, true);
+    }
+
+    #[test]
+    fn parse_type_specifiers() {
+        let code = r#"
+            /* These declarations all look slightly different,
+             * but they all declare 'my_function' as a function
+             * with three long parameters and an int return value,
+             * so they don't conflict.
+             */
+            int my_function(long a, long int b, int long c);
+            int my_function(long int x, int long y, long z) {
+                return x + y + z;
+            }
+
+            int main(void) {
+                /* Several different ways to declare local long variables */
+                long x = 1l;
+                long int y = 2l;
+                int long z = 3l;
+
+                /* This links to the file-scope declarations of 'a' above */
+                extern long a;
+                a = 4;
+
+                /* make sure we can use long type specifier in for loop initializer
+                 * i is 2^40 so this loop should have 41 iterations
+                */
+               int sum = 0;
+                for (long i = 1099511627776l; i > 0; i = i / 2) {
+                    sum = sum + 1;
+                }
+
+                /* Make sure everything has the expected value */
+                if (x != 1) {
+                    return 1;
+                }
+
+                if (y != 2) {
+                    return 2;
+                }
+
+                if (a != 4) {
+                    return 3;
+                }
+
+                if (my_function(x,  y, z) != 6) {
+                    return 4;
+                }
+
+                if (sum != 41) {
+                    return 5;
+                }
+                return 0;
+            }
+        "#;
+
+        parse_code(code, true);
+    }
+
+    #[test]
+    fn parse_loop_counter_with_extern() {
+        let code = r#"
+        int main(void) {
+            for (extern int i = 0; i < 10; i = i + 1) {
+                return 0;
+            }
+        }
+        "#;
+
+        parse_code(code, true);
+    }
+
+    #[test]
+    fn parse_long_constants() {
+        let code = r#"
+            int main(void) {
+
+                /* A constant with an l suffix always has long type */
+
+                // if we parse these as ints, this addition will probably overflow and be negative
+                if (2147483647l + 2147483647l < 0l) {
+                    return 1;
+                }
+                /* if a constant is too large to store as an int,
+                 * it's automatically converted to a long, even if it
+                 * doesn't have an 'l' suffix
+                 * if we parsed 19327352832 as an int, it would be negative
+                 */
+                if (19327352832 < 100l) { // 19327352832 == 2^34 + 2^31
+                    return 2;
+                }
+                return 0;
             }
         "#;
 
