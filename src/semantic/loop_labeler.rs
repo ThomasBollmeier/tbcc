@@ -1,4 +1,4 @@
-use crate::ast::{Expression, Label, Statement};
+use crate::ast::{Expression, Label, Statement, TypedExpression};
 use crate::semantic::walker;
 use crate::semantic::walker::WalkerMut;
 use crate::semantic::{NameGeneratorRef, name_generator};
@@ -9,7 +9,7 @@ pub struct LoopLabeler {
     loop_id_generator: NameGeneratorRef,
     switch_id_generator: NameGeneratorRef,
     target_ids: Vec<TargetId>,
-    arms: Vec<Vec<(String, Option<Expression>)>>,
+    arms: Vec<Vec<(String, Option<TypedExpression>)>>,
 }
 
 impl LoopLabeler {
@@ -55,13 +55,13 @@ impl LoopLabeler {
         Err(anyhow::anyhow!("not inside a switch statement"))
     }
 
-    fn validate_arms(&mut self, arms: &Vec<(String, Option<Expression>)>) -> Result<()> {
+    fn validate_arms(&mut self, arms: &Vec<(String, Option<TypedExpression>)>) -> Result<()> {
         let mut cnt_default = 0;
         let mut case_values: HashSet<i32> = HashSet::new();
 
         for (_, expr) in arms {
             match expr {
-                Some(expr) => match expr {
+                Some(TypedExpression(expr, _)) => match expr {
                     Expression::IntegerConstant(value) => {
                         if case_values.contains(&value) {
                             return Err(anyhow::anyhow!("case arm value is already used"));
@@ -154,7 +154,7 @@ enum TargetId {
 mod tests {
     use anyhow::anyhow;
     use super::*;
-    use crate::ast::{Block, BlockItem, Declaration, Expression, FunctionDeclaration, Label, Program, Statement, Type};
+    use crate::ast::{typed, Block, BlockItem, Declaration, Expression, FunctionDeclaration, Label, Program, Statement, Type};
     use crate::lexer::Lexer;
     use crate::parser::Parser;
 
@@ -197,7 +197,7 @@ mod tests {
     fn labels_break_and_continue_in_single_loop() {
         let mut program = program_with_statement(Statement::While {
             loop_id: String::new(),
-            condition: Expression::IntegerConstant(1),
+            condition: typed(Expression::IntegerConstant(1)),
             body: Box::new(Statement::CompoundStatement(Block::new(vec![
                 BlockItem::Statement(Statement::Break {
                     loop_id: String::new(),
@@ -247,14 +247,14 @@ mod tests {
     fn labels_break_and_continue_in_nested_loops() {
         let mut program = program_with_statement(Statement::While {
             loop_id: String::new(),
-            condition: Expression::IntegerConstant(1),
+            condition: typed(Expression::IntegerConstant(1)),
             body: Box::new(Statement::CompoundStatement(Block::new(vec![
                 BlockItem::Statement(Statement::Continue {
                     loop_id: String::new(),
                 }),
                 BlockItem::Statement(Statement::While {
                     loop_id: String::new(),
-                    condition: Expression::IntegerConstant(1),
+                    condition: typed(Expression::IntegerConstant(1)),
                     body: Box::new(Statement::CompoundStatement(Block::new(vec![
                         BlockItem::Statement(Statement::Break {
                             loop_id: String::new(),
@@ -337,12 +337,12 @@ mod tests {
     fn labels_switch_statement_targets_and_arms() {
         let mut program = program_with_statement(Statement::SwitchStatement {
             switch_id: String::new(),
-            condition: Expression::Var("x".to_string()),
+            condition: typed(Expression::Var("x".to_string())),
             body: Box::new(Statement::CompoundStatement(Block::new(vec![
                 BlockItem::Statement(Statement::LabeledStatement {
                     label: Label::Case {
                         case_id: String::new(),
-                        value: Expression::IntegerConstant(1),
+                        value: typed(Expression::IntegerConstant(1)),
                     },
                     statement: Box::new(Statement::Break {
                         loop_id: String::new(),
@@ -351,7 +351,7 @@ mod tests {
                 BlockItem::Statement(Statement::LabeledStatement {
                     label: Label::Case {
                         case_id: String::new(),
-                        value: Expression::IntegerConstant(2),
+                        value: typed(Expression::IntegerConstant(2)),
                     },
                     statement: Box::new(Statement::Null),
                 }),

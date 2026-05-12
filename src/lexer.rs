@@ -88,54 +88,54 @@ impl Lexer {
             keywords: HashMap::new(),
         };
 
-        lexer.add_token_type_full(TokenType::Whitespace, r"\s+", true, false);
-        lexer.add_token_type_full(TokenType::LineComment, r"//.*", true, false);
-        lexer.add_token_type_full(IntLongTokenDerivation, r"\d+[lL]?\b", false, false);
+        lexer.add_token_rule_full(TokenType::Whitespace, r"\s+", true, false);
+        lexer.add_token_rule_full(TokenType::LineComment, r"//.*", true, false);
 
-        lexer.add_token_type(TokenType::Identifier, r"[a-zA-Z_][a-zA-Z0-9_]*\b");
-        lexer.add_token_type(TokenType::LeftParen, r"\(");
-        lexer.add_token_type(TokenType::RightParen, r"\)");
-        lexer.add_token_type(TokenType::LeftBrace, r"\{");
-        lexer.add_token_type(TokenType::RightBrace, r"\}");
-        lexer.add_token_type(TokenType::Comma, r",");
-        lexer.add_token_type(TokenType::Semicolon, r";");
-        lexer.add_token_type(TokenType::Minus, r"\-");
-        lexer.add_token_type(TokenType::Tilde, r"~");
-        lexer.add_token_type(TokenType::Plus, r"\+");
-        lexer.add_token_type(TokenType::Asterisk, r"\*");
-        lexer.add_token_type(TokenType::Slash, r"/");
-        lexer.add_token_type(TokenType::Percent, r"%");
-        lexer.add_token_type(TokenType::BitAnd, r"&");
-        lexer.add_token_type(TokenType::BitOr, r"\|");
-        lexer.add_token_type(TokenType::BitXor, r"\^");
-        lexer.add_token_type(TokenType::ShiftLeft, r"<<");
-        lexer.add_token_type(TokenType::ShiftRight, r">>");
-        lexer.add_token_type(TokenType::LogicalAnd, r"&&");
-        lexer.add_token_type(TokenType::LogicalOr, r"\|\|");
-        lexer.add_token_type(TokenType::LogicalNot, r"!");
-        lexer.add_token_type(TokenType::Equal, r"==");
-        lexer.add_token_type(TokenType::NotEqual, r"!=");
-        lexer.add_token_type(TokenType::GreaterEqual, r">=");
-        lexer.add_token_type(TokenType::Greater, r">");
-        lexer.add_token_type(TokenType::Less, r"<");
-        lexer.add_token_type(TokenType::LessEqual, r"<=");
-        lexer.add_token_type(TokenType::Assign, r"=");
-        lexer.add_token_type(TokenType::AssignAdd, r"\+=");
-        lexer.add_token_type(TokenType::AssignSub, r"\-=");
-        lexer.add_token_type(TokenType::AssignMul, r"\*=");
-        lexer.add_token_type(TokenType::AssignDiv, r"/=");
-        lexer.add_token_type(TokenType::AssignRemainder, r"%=");
-        lexer.add_token_type(TokenType::AssignBitAnd, r"&=");
-        lexer.add_token_type(TokenType::AssignBitOr, r"\|=");
-        lexer.add_token_type(TokenType::AssignBitXor, r"\^=");
-        lexer.add_token_type(TokenType::AssignShiftLeft, r"<<=");
-        lexer.add_token_type(TokenType::AssignShiftRight, r">>=");
-        lexer.add_token_type(TokenType::IncrementPrefix, r"\+\+(?=[\w\(])");
-        lexer.add_token_type(TokenType::IncrementPostfix, r"\+\+(?![\w\(])");
-        lexer.add_token_type(TokenType::DecrementPrefix, r"\-\-(?=[\w\(])");
-        lexer.add_token_type(TokenType::DecrementPostfix, r"\-\-(?![\w\(])");
-        lexer.add_token_type(TokenType::QuestionMark, r"\?");
-        lexer.add_token_type(TokenType::Colon, r":");
+        lexer.add_token_rule(IntLongTokenDerivation, r"\d+[lL]?\b");
+        lexer.add_token_rule(TokenType::Identifier, r"[a-zA-Z_][a-zA-Z0-9_]*\b");
+        lexer.add_token_rule(TokenType::LeftParen, r"\(");
+        lexer.add_token_rule(TokenType::RightParen, r"\)");
+        lexer.add_token_rule(TokenType::LeftBrace, r"\{");
+        lexer.add_token_rule(TokenType::RightBrace, r"\}");
+        lexer.add_token_rule(TokenType::Comma, r",");
+        lexer.add_token_rule(TokenType::Semicolon, r";");
+        lexer.add_token_rule(TokenType::Minus, r"\-");
+        lexer.add_token_rule(TokenType::Tilde, r"~");
+        lexer.add_token_rule(TokenType::Plus, r"\+");
+        lexer.add_token_rule(TokenType::Asterisk, r"\*");
+        lexer.add_token_rule(TokenType::Slash, r"/");
+        lexer.add_token_rule(TokenType::Percent, r"%");
+        lexer.add_token_rule(TokenType::BitAnd, r"&");
+        lexer.add_token_rule(TokenType::BitOr, r"\|");
+        lexer.add_token_rule(TokenType::BitXor, r"\^");
+        lexer.add_token_rule(TokenType::ShiftLeft, r"<<");
+        lexer.add_token_rule(TokenType::ShiftRight, r">>");
+        lexer.add_token_rule(TokenType::LogicalAnd, r"&&");
+        lexer.add_token_rule(TokenType::LogicalOr, r"\|\|");
+        lexer.add_token_rule(TokenType::LogicalNot, r"!");
+        lexer.add_token_rule(TokenType::Equal, r"==");
+        lexer.add_token_rule(TokenType::NotEqual, r"!=");
+        lexer.add_token_rule(TokenType::GreaterEqual, r">=");
+        lexer.add_token_rule(TokenType::Greater, r">");
+        lexer.add_token_rule(TokenType::Less, r"<");
+        lexer.add_token_rule(TokenType::LessEqual, r"<=");
+        lexer.add_token_rule(TokenType::Assign, r"=");
+        lexer.add_token_rule(TokenType::AssignAdd, r"\+=");
+        lexer.add_token_rule(TokenType::AssignSub, r"\-=");
+        lexer.add_token_rule(TokenType::AssignMul, r"\*=");
+        lexer.add_token_rule(TokenType::AssignDiv, r"/=");
+        lexer.add_token_rule(TokenType::AssignRemainder, r"%=");
+        lexer.add_token_rule(TokenType::AssignBitAnd, r"&=");
+        lexer.add_token_rule(TokenType::AssignBitOr, r"\|=");
+        lexer.add_token_rule(TokenType::AssignBitXor, r"\^=");
+        lexer.add_token_rule(TokenType::AssignShiftLeft, r"<<=");
+        lexer.add_token_rule(TokenType::AssignShiftRight, r">>=");
+        lexer.add_token_rule(TokenType::IncrementPrefix, r"\+\+(?=[\w\(])");
+        lexer.add_token_rule(TokenType::IncrementPostfix, r"\+\+(?![\w\(])");
+        lexer.add_token_rule(TokenType::DecrementPrefix, r"\-\-(?=[\w\(])");
+        lexer.add_token_rule(TokenType::DecrementPostfix, r"\-\-(?![\w\(])");
+        lexer.add_token_rule(TokenType::QuestionMark, r"\?");
+        lexer.add_token_rule(TokenType::Colon, r":");
 
         lexer.keywords.insert("int".to_string(), TokenType::Int);
         lexer.keywords.insert("long".to_string(), TokenType::Long);
@@ -248,15 +248,15 @@ impl Lexer {
         Self::advance_position(&block_comment, line, column)
     }
 
-    fn add_token_type<T: Into<Box<dyn TokenDerivation>>>(
+    fn add_token_rule<T: Into<Box<dyn TokenDerivation>>>(
         &mut self,
         token_derivation: T,
         pattern: &str,
     ) {
-        self.add_token_type_full(token_derivation, pattern, false, false);
+        self.add_token_rule_full(token_derivation, pattern, false, false);
     }
 
-    fn add_token_type_full<T: Into<Box<dyn TokenDerivation>>>(
+    fn add_token_rule_full<T: Into<Box<dyn TokenDerivation>>>(
         &mut self,
         token_derivation: T,
         pattern: &str,

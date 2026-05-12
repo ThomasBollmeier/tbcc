@@ -1,6 +1,7 @@
 use std::collections::hash_map::{Entry, Iter};
 use std::collections::HashMap;
 use std::sync::{OnceLock, RwLock};
+use crate::ast::Type;
 
 static SYMBOL_TABLE: OnceLock<RwLock<SymbolTable>> = OnceLock::new();
 
@@ -73,16 +74,8 @@ impl SymbolTable {
 
 #[derive(Debug, Clone)]
 pub struct SymbolTableEntry {
-    pub c_type: CType,
+    pub c_type: Type,
     pub attrs: IdentAttrs,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum CType {
-    Int,
-    Function {
-        num_params: usize,
-    },
 }
 
 #[derive(Debug, Clone)]
@@ -112,12 +105,18 @@ mod tests {
     fn local_table_insert_and_get() {
         let mut table = SymbolTable::new();
         table.insert("main", SymbolTableEntry{
-            c_type: CType::Function { num_params: 0 },
+            c_type: Type::Function {
+                return_type: Box::new(Type::Int),
+                param_types: vec![],
+            },
             attrs: IdentAttrs::Function { is_defined: true, is_global: true },
         });
 
         assert_eq!(
-            Some(&CType::Function { num_params: 0 }),
+            Some(&Type::Function {
+                return_type: Box::new(Type::Int),
+                param_types: vec![],
+            }),
             table.get_entry("main").map(|entry| &entry.c_type)
         );
     }
@@ -127,12 +126,12 @@ mod tests {
         with_global_symbol_table_mut(|table| {
             table.clear();
             table.insert("x", SymbolTableEntry {
-                c_type: CType::Int,
+                c_type: Type::Int,
                 attrs: IdentAttrs::Local,
             });
         });
 
         let loaded = with_global_symbol_table(|table| table.get_entry_cloned("x"));
-        assert_eq!(Some(CType::Int), loaded.map(|entry| entry.c_type));
+        assert_eq!(Some(Type::Int), loaded.map(|entry| entry.c_type));
     }
 }

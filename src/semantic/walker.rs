@@ -1,4 +1,7 @@
-use crate::ast::{Block, VarDeclaration, Expression, ForInit, FunctionDeclaration, Program, Statement, Declaration};
+use crate::ast::{
+    Block, Declaration, Expression, ForInit, FunctionDeclaration, Program, Statement,
+    TypedExpression, VarDeclaration,
+};
 use anyhow::Result;
 
 #[allow(unused_variables)]
@@ -38,6 +41,14 @@ pub trait WalkerMut {
         Ok(())
     }
 
+    fn enter_typed_expression(&mut self, expr: &mut TypedExpression) -> Result<()> {
+        Ok(())
+    }
+
+    fn leave_typed_expression(&mut self, expr: &mut TypedExpression) -> Result<()> {
+        Ok(())
+    }
+
     fn enter_expression(&mut self, expr: &mut Expression) -> Result<()> {
         Ok(())
     }
@@ -62,7 +73,10 @@ pub fn walk(program: &mut Program, walker: &mut impl WalkerMut) -> Result<()> {
     Ok(())
 }
 
-fn walk_function_decl(func_decl: &mut FunctionDeclaration, walker: &mut impl WalkerMut) -> Result<()> {
+fn walk_function_decl(
+    func_decl: &mut FunctionDeclaration,
+    walker: &mut impl WalkerMut,
+) -> Result<()> {
     walker.enter_func_decl(func_decl)?;
     if let Some(body) = &mut func_decl.body {
         walk_block(body, walker)?;
@@ -93,7 +107,7 @@ fn walk_block(block: &mut Block, walker: &mut impl WalkerMut) -> Result<()> {
 fn walk_declaration(decl: &mut VarDeclaration, walker: &mut impl WalkerMut) -> Result<()> {
     walker.enter_declaration(decl)?;
     if let Some(init_expr) = &mut decl.init_expr {
-        walk_expression(init_expr, walker)?;
+        walk_typed_expression(init_expr, walker)?;
     }
     walker.leave_declaration(decl)?;
     Ok(())
@@ -106,10 +120,10 @@ fn walk_statement(stmt: &mut Statement, walker: &mut impl WalkerMut) -> Result<(
 
     match stmt {
         Return(expr) => {
-            walk_expression(expr, walker)?;
+            walk_typed_expression(expr, walker)?;
         }
         Expression(expr) => {
-            walk_expression(expr, walker)?;
+            walk_typed_expression(expr, walker)?;
         }
         Null => {}
         Break { loop_id: _ } => {}
@@ -119,7 +133,7 @@ fn walk_statement(stmt: &mut Statement, walker: &mut impl WalkerMut) -> Result<(
             condition,
             body,
         } => {
-            walk_expression(condition, walker)?;
+            walk_typed_expression(condition, walker)?;
             walk_statement(body, walker)?;
         }
         DoWhile {
@@ -128,7 +142,7 @@ fn walk_statement(stmt: &mut Statement, walker: &mut impl WalkerMut) -> Result<(
             body,
         } => {
             walk_statement(body, walker)?;
-            walk_expression(condition, walker)?;
+            walk_typed_expression(condition, walker)?;
         }
         For {
             loop_id: _,
@@ -139,10 +153,10 @@ fn walk_statement(stmt: &mut Statement, walker: &mut impl WalkerMut) -> Result<(
         } => {
             walk_for_init(init, walker)?;
             if let Some(condition) = condition {
-                walk_expression(condition, walker)?;
+                walk_typed_expression(condition, walker)?;
             }
             if let Some(post) = post {
-                walk_expression(post, walker)?;
+                walk_typed_expression(post, walker)?;
             }
             walk_statement(body, walker)?;
         }
@@ -154,18 +168,16 @@ fn walk_statement(stmt: &mut Statement, walker: &mut impl WalkerMut) -> Result<(
             then_branch,
             else_branch,
         } => {
-            walk_expression(condition, walker)?;
+            walk_typed_expression(condition, walker)?;
             walk_statement(then_branch, walker)?;
             if let Some(else_branch) = else_branch {
                 walk_statement(else_branch, walker)?;
             }
         }
         SwitchStatement {
-            condition,
-            body,
-            ..
+            condition, body, ..
         } => {
-            walk_expression(condition, walker)?;
+            walk_typed_expression(condition, walker)?;
             walk_statement(body, walker)?;
         }
         GotoStatement(_) => {}
@@ -179,8 +191,19 @@ fn walk_statement(stmt: &mut Statement, walker: &mut impl WalkerMut) -> Result<(
     Ok(())
 }
 
+fn walk_typed_expression(expr: &mut TypedExpression, walker: &mut impl WalkerMut) -> Result<()> {
+    walker.enter_typed_expression(expr)?;
+
+    walk_expression(&mut expr.0, walker)?;
+
+    walker.leave_typed_expression(expr)?;
+
+    Ok(())
+}
+
 fn walk_expression(expr: &mut Expression, walker: &mut impl WalkerMut) -> Result<()> {
     use Expression::*;
+
     walker.enter_expression(expr)?;
 
     match expr {
@@ -190,37 +213,37 @@ fn walk_expression(expr: &mut Expression, walker: &mut impl WalkerMut) -> Result
             target_type: _,
             expr,
         } => {
-            walk_expression(expr, walker)?;
+            walk_typed_expression(expr, walker)?;
         }
         Var(_) => {}
-        FuncCall {args, ..} => {
+        FuncCall { args, .. } => {
             for arg in args {
-                walk_expression(arg, walker)?;
+                walk_typed_expression(arg, walker)?;
             }
         }
         UnaryExpr(_, expr) => {
-            walk_expression(expr, walker)?;
+            walk_typed_expression(expr, walker)?;
         }
         BinaryExpr(_, left, right) => {
-            walk_expression(left, walker)?;
-            walk_expression(right, walker)?;
+            walk_typed_expression(left, walker)?;
+            walk_typed_expression(right, walker)?;
         }
         Assignment {
             left,
             right,
             is_postfix: _,
         } => {
-            walk_expression(left, walker)?;
-            walk_expression(right, walker)?;
+            walk_typed_expression(left, walker)?;
+            walk_typed_expression(right, walker)?;
         }
         ConditionalExpr {
             condition,
             then_expr,
             else_expr,
         } => {
-            walk_expression(condition, walker)?;
-            walk_expression(then_expr, walker)?;
-            walk_expression(else_expr, walker)?;
+            walk_typed_expression(condition, walker)?;
+            walk_typed_expression(then_expr, walker)?;
+            walk_typed_expression(else_expr, walker)?;
         }
     }
 
@@ -236,7 +259,7 @@ fn walk_for_init(init: &mut ForInit, walker: &mut impl WalkerMut) -> Result<()> 
         }
         ForInit::InitExpression(expr) => {
             if let Some(expr) = expr {
-                walk_expression(expr, walker)?;
+                walk_typed_expression(expr, walker)?;
             }
         }
     }

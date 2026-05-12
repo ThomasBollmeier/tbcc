@@ -1,7 +1,7 @@
 use super::ast::Instruction::Unary;
 use super::ast::Value::IntegerConstant;
 use super::ast::{BinaryOperator, Function, Instruction, Program, TopLevel, UnaryOperator, Value};
-use crate::ast::{BinaryOp, Block, BlockItem, Expression, ForInit, FunctionDeclaration, Label, Statement, StorageClass, UnaryOp, VarDeclaration};
+use crate::ast::{BinaryOp, Block, BlockItem, Expression, ForInit, FunctionDeclaration, Label, Statement, StorageClass, TypedExpression, UnaryOp, VarDeclaration};
 use crate::semantic::symbol_table::{IdentAttrs, InitialValue};
 use crate::semantic::{NameGeneratorRef, symbol_table};
 use anyhow::{Result, anyhow};
@@ -183,8 +183,8 @@ impl TackyEmitter {
         &mut self,
         loop_id: &str,
         init: &ForInit,
-        condition: &Option<Expression>,
-        post: &Option<Expression>,
+        condition: &Option<TypedExpression>,
+        post: &Option<TypedExpression>,
         body: &Box<Statement>,
     ) -> Result<Vec<Instruction>> {
         let mut instructions = vec![];
@@ -239,7 +239,7 @@ impl TackyEmitter {
     fn emit_while_statement(
         &mut self,
         loop_id: &str,
-        condition: &Expression,
+        condition: &TypedExpression,
         body: &Statement,
     ) -> Result<Vec<Instruction>> {
         let mut instructions = vec![];
@@ -266,7 +266,7 @@ impl TackyEmitter {
         &mut self,
         loop_id: &str,
         body: &Statement,
-        condition: &Expression,
+        condition: &TypedExpression,
     ) -> Result<Vec<Instruction>> {
         let mut instructions = vec![];
 
@@ -284,14 +284,14 @@ impl TackyEmitter {
         Ok(instructions)
     }
 
-    fn emit_return_statement(&mut self, expr: &Expression) -> Result<Vec<Instruction>> {
+    fn emit_return_statement(&mut self, expr: &TypedExpression) -> Result<Vec<Instruction>> {
         let mut instructions = vec![];
         let value = self.emit_expression(expr, &mut instructions);
         instructions.push(Instruction::Return(value));
         Ok(instructions)
     }
 
-    fn emit_expression_statement(&mut self, expr: &Expression) -> Result<Vec<Instruction>> {
+    fn emit_expression_statement(&mut self, expr: &TypedExpression) -> Result<Vec<Instruction>> {
         let mut instructions = vec![];
         self.emit_expression(expr, &mut instructions);
         Ok(instructions)
@@ -332,7 +332,7 @@ impl TackyEmitter {
 
     fn emit_if_statement(
         &mut self,
-        condition: &Expression,
+        condition: &TypedExpression,
         then_branch: &Box<Statement>,
         else_branch: &Option<Box<Statement>>,
     ) -> Result<Vec<Instruction>> {
@@ -370,9 +370,9 @@ impl TackyEmitter {
     fn emit_switch_statement(
         &mut self,
         switch_id: &str,
-        condition: &Expression,
+        condition: &TypedExpression,
         body: &Statement,
-        arms: &Vec<(String, Option<Expression>)>,
+        arms: &Vec<(String, Option<TypedExpression>)>,
     ) -> Result<Vec<Instruction>> {
         let mut instructions = vec![];
 
@@ -412,8 +412,8 @@ impl TackyEmitter {
         Ok(instructions)
     }
 
-    fn emit_expression(&mut self, expr: &Expression, instructions: &mut Vec<Instruction>) -> Value {
-        match expr {
+    fn emit_expression(&mut self, expr: &TypedExpression, instructions: &mut Vec<Instruction>) -> Value {
+        match &expr.0 {
             Expression::IntegerConstant(value) => self.emit_integer_constant(*value),
             Expression::UnaryExpr(op, expr) => self.emit_unary_expr(op, expr, instructions),
             Expression::BinaryExpr(BinaryOp::LogicalAnd, left, right) => {
@@ -454,7 +454,7 @@ impl TackyEmitter {
     fn emit_unary_expr(
         &mut self,
         op: &UnaryOp,
-        expr: &Expression,
+        expr: &TypedExpression,
         instructions: &mut Vec<Instruction>,
     ) -> Value {
         let op = self.unary_op(op);
@@ -470,8 +470,8 @@ impl TackyEmitter {
 
     fn emit_logical_and_expr(
         &mut self,
-        left: &Expression,
-        right: &Expression,
+        left: &TypedExpression,
+        right: &TypedExpression,
         instructions: &mut Vec<Instruction>,
     ) -> Value {
         let end_label = self.make_label("and_end");
@@ -510,8 +510,8 @@ impl TackyEmitter {
 
     fn emit_logical_or_expr(
         &mut self,
-        left: &Expression,
-        right: &Expression,
+        left: &TypedExpression,
+        right: &TypedExpression,
         instructions: &mut Vec<Instruction>,
     ) -> Value {
         let end_label = self.make_label("or_end");
@@ -551,8 +551,8 @@ impl TackyEmitter {
     fn emit_binary_expr(
         &mut self,
         op: &BinaryOp,
-        left: &Expression,
-        right: &Expression,
+        left: &TypedExpression,
+        right: &TypedExpression,
         instructions: &mut Vec<Instruction>,
     ) -> Value {
         let src1 = self.emit_expression(left, instructions);
@@ -570,8 +570,8 @@ impl TackyEmitter {
 
     fn emit_assignment_expr(
         &mut self,
-        left: &Expression,
-        right: &Expression,
+        left: &TypedExpression,
+        right: &TypedExpression,
         is_postfix: bool,
         instructions: &mut Vec<Instruction>,
     ) -> Value {
@@ -596,9 +596,9 @@ impl TackyEmitter {
 
     fn emit_conditional_expr(
         &mut self,
-        condition: &Expression,
-        then_expr: &Expression,
-        else_expr: &Expression,
+        condition: &TypedExpression,
+        then_expr: &TypedExpression,
+        else_expr: &TypedExpression,
         instructions: &mut Vec<Instruction>,
     ) -> Value {
         let end_label = self.make_label("cond_end");
@@ -634,7 +634,7 @@ impl TackyEmitter {
     fn emit_func_call_expr(
         &mut self,
         name: &str,
-        args: &Vec<Expression>,
+        args: &Vec<TypedExpression>,
         instructions: &mut Vec<Instruction>,
     ) -> Value {
         let arguments: Vec<Value> = args
@@ -712,6 +712,7 @@ impl TackyEmitter {
 
 #[cfg(test)]
 mod tests {
+    use crate::ast::typed;
     use super::*;
     use crate::semantic;
     use crate::tacky::ast::UnaryOperator::{Complement, Negate};
@@ -725,7 +726,7 @@ mod tests {
     #[test]
     fn emit_return() {
         let mut emitter = make_emitter();
-        let stmt = Statement::Return(Expression::IntegerConstant(42));
+        let stmt = Statement::Return(typed(Expression::IntegerConstant(42)));
         let expected = vec![Instruction::Return(IntegerConstant(42))];
         let actual = emitter.emit_statement(&stmt).unwrap();
 
@@ -739,16 +740,16 @@ mod tests {
         use Value::*;
 
         let mut emitter = make_emitter();
-        let stmt = Statement::Return(UnaryExpr(
+        let stmt = Statement::Return(typed(UnaryExpr(
             UnaryOp::Negate,
-            Box::new(UnaryExpr(
+            Box::new(typed(UnaryExpr(
                 UnaryOp::Complement,
-                Box::new(UnaryExpr(
+                Box::new(typed(UnaryExpr(
                     UnaryOp::Negate,
-                    Box::new(Expression::IntegerConstant(42)),
-                )),
-            )),
-        ));
+                    Box::new(typed(Expression::IntegerConstant(42))),
+                ))),
+            ))),
+        )));
         let expected = vec![
             Unary {
                 op: Negate,
@@ -780,15 +781,15 @@ mod tests {
         use Value::*;
 
         let mut emitter = make_emitter();
-        let stmt = Statement::Return(BinaryExpr(
+        let stmt = Statement::Return(typed(BinaryExpr(
             BinaryOp::Add,
-            Box::new(Expression::IntegerConstant(1)),
-            Box::new(BinaryExpr(
+            Box::new(typed(Expression::IntegerConstant(1))),
+            Box::new(typed(BinaryExpr(
                 BinaryOp::Multiply,
-                Box::new(Expression::IntegerConstant(2)),
-                Box::new(Expression::IntegerConstant(3)),
-            )),
-        ));
+                Box::new(typed(Expression::IntegerConstant(2))),
+                Box::new(typed(Expression::IntegerConstant(3))),
+            ))),
+        )));
 
         let expected = vec![
             Binary {
@@ -818,11 +819,11 @@ mod tests {
         use Value::*;
 
         let mut emitter = make_emitter();
-        let stmt = Statement::Return(BinaryExpr(
+        let stmt = Statement::Return(typed(BinaryExpr(
             BinaryOp::ShiftLeft,
-            Box::new(Expression::IntegerConstant(8)),
-            Box::new(Expression::IntegerConstant(2)),
-        ));
+            Box::new(typed(Expression::IntegerConstant(8))),
+            Box::new(typed(Expression::IntegerConstant(2))),
+        )));
 
         let expected = vec![
             Binary {
@@ -846,11 +847,11 @@ mod tests {
         use Value::*;
 
         let mut emitter = make_emitter();
-        let stmt = Statement::Return(BinaryExpr(
+        let stmt = Statement::Return(typed(BinaryExpr(
             BinaryOp::ShiftRight,
-            Box::new(Expression::IntegerConstant(16)),
-            Box::new(Expression::IntegerConstant(1)),
-        ));
+            Box::new(typed(Expression::IntegerConstant(16))),
+            Box::new(typed(Expression::IntegerConstant(1))),
+        )));
 
         let expected = vec![
             Binary {
@@ -873,11 +874,11 @@ mod tests {
         use Value::*;
 
         let mut emitter = make_emitter();
-        let stmt = Statement::Return(BinaryExpr(
+        let stmt = Statement::Return(typed(BinaryExpr(
             BinaryOp::LogicalAnd,
-            Box::new(Expression::IntegerConstant(1)),
-            Box::new(Expression::IntegerConstant(0)),
-        ));
+            Box::new(typed(Expression::IntegerConstant(1))),
+            Box::new(typed(Expression::IntegerConstant(0))),
+        )));
 
         let expected = vec![
             JumpIfZero {
@@ -915,11 +916,11 @@ mod tests {
         use Value::*;
 
         let mut emitter = make_emitter();
-        let stmt = Statement::Return(BinaryExpr(
+        let stmt = Statement::Return(typed(BinaryExpr(
             BinaryOp::LogicalOr,
-            Box::new(Expression::IntegerConstant(0)),
-            Box::new(Expression::IntegerConstant(1)),
-        ));
+            Box::new(typed(Expression::IntegerConstant(0))),
+            Box::new(typed(Expression::IntegerConstant(1))),
+        )));
 
         let expected = vec![
             JumpIfNotZero {
@@ -958,15 +959,15 @@ mod tests {
         use Value::*;
 
         let mut emitter = make_emitter();
-        let stmt = Statement::Return(Assignment {
-            left: Box::new(Var("a".to_string())),
-            right: Box::new(BinaryExpr(
+        let stmt = Statement::Return(typed(Assignment {
+            left: Box::new(typed(Var("a".to_string()))),
+            right: Box::new(typed(BinaryExpr(
                 BinaryOp::Add,
-                Box::new(Var("a".to_string())),
-                Box::new(Expression::IntegerConstant(1)),
-            )),
+                Box::new(typed(Var("a".to_string()))),
+                Box::new(typed(Expression::IntegerConstant(1))),
+            ))),
             is_postfix: false,
-        });
+        }));
 
         let expected = vec![
             Binary {
@@ -994,15 +995,15 @@ mod tests {
         use Value::*;
 
         let mut emitter = make_emitter();
-        let stmt = Statement::Return(Assignment {
-            left: Box::new(Var("a".to_string())),
-            right: Box::new(BinaryExpr(
+        let stmt = Statement::Return(typed(Assignment {
+            left: Box::new(typed(Var("a".to_string()))),
+            right: Box::new(typed(BinaryExpr(
                 BinaryOp::Add,
-                Box::new(Var("a".to_string())),
-                Box::new(Expression::IntegerConstant(1)),
-            )),
+                Box::new(typed(Var("a".to_string()))),
+                Box::new(typed(Expression::IntegerConstant(1))),
+            ))),
             is_postfix: true,
-        });
+        }));
 
         let expected = vec![
             Binary {
@@ -1034,15 +1035,15 @@ mod tests {
         use Value::*;
 
         let mut emitter = make_emitter();
-        let stmt = Statement::Return(Assignment {
-            left: Box::new(Var("a".to_string())),
-            right: Box::new(BinaryExpr(
+        let stmt = Statement::Return(typed(Assignment {
+            left: Box::new(typed(Var("a".to_string()))),
+            right: Box::new(typed(BinaryExpr(
                 BinaryOp::Subtract,
-                Box::new(Var("a".to_string())),
-                Box::new(Expression::IntegerConstant(1)),
-            )),
+                Box::new(typed(Var("a".to_string()))),
+                Box::new(typed(Expression::IntegerConstant(1))),
+            ))),
             is_postfix: false,
-        });
+        }));
 
         let expected = vec![
             Binary {
@@ -1070,15 +1071,15 @@ mod tests {
         use Value::*;
 
         let mut emitter = make_emitter();
-        let stmt = Statement::Return(Assignment {
-            left: Box::new(Var("a".to_string())),
-            right: Box::new(BinaryExpr(
+        let stmt = Statement::Return(typed(Assignment {
+            left: Box::new(typed(Var("a".to_string()))),
+            right: Box::new(typed(BinaryExpr(
                 BinaryOp::Subtract,
-                Box::new(Var("a".to_string())),
-                Box::new(Expression::IntegerConstant(1)),
-            )),
+                Box::new(typed(Var("a".to_string()))),
+                Box::new(typed(Expression::IntegerConstant(1))),
+            ))),
             is_postfix: true,
-        });
+        }));
 
         let expected = vec![
             Binary {
@@ -1108,8 +1109,8 @@ mod tests {
 
         let mut emitter = make_emitter();
         let stmt = Statement::IfStatement {
-            condition: Expression::IntegerConstant(1),
-            then_branch: Box::new(Statement::Return(Expression::IntegerConstant(42))),
+            condition: typed(Expression::IntegerConstant(1)),
+            then_branch: Box::new(Statement::Return(typed(Expression::IntegerConstant(42)))),
             else_branch: None,
         };
 
@@ -1133,9 +1134,9 @@ mod tests {
 
         let mut emitter = make_emitter();
         let stmt = Statement::IfStatement {
-            condition: IntegerConstant(1),
-            then_branch: Box::new(Statement::Return(IntegerConstant(42))),
-            else_branch: Some(Box::new(Statement::Return(IntegerConstant(0)))),
+            condition: typed(IntegerConstant(1)),
+            then_branch: Box::new(Statement::Return(typed(IntegerConstant(42)))),
+            else_branch: Some(Box::new(Statement::Return(typed(IntegerConstant(0))))),
         };
 
         let expected = vec![
@@ -1162,11 +1163,11 @@ mod tests {
         use Value::*;
 
         let mut emitter = make_emitter();
-        let stmt = Statement::Return(Expression::ConditionalExpr {
-            condition: Box::new(Expression::IntegerConstant(1)),
-            then_expr: Box::new(Expression::IntegerConstant(42)),
-            else_expr: Box::new(Expression::IntegerConstant(0)),
-        });
+        let stmt = Statement::Return(typed(Expression::ConditionalExpr {
+            condition: Box::new(typed(Expression::IntegerConstant(1))),
+            then_expr: Box::new(typed(Expression::IntegerConstant(42))),
+            else_expr: Box::new(typed(Expression::IntegerConstant(0))),
+        }));
 
         let expected = vec![
             JumpIfZero {
@@ -1200,11 +1201,11 @@ mod tests {
 
         let mut emitter = make_emitter();
         let stmt = Statement::IfStatement {
-            condition: Expression::Var("a".to_string()),
+            condition: typed(Expression::Var("a".to_string())),
             then_branch: Box::new(Statement::IfStatement {
-                condition: Expression::Var("b".to_string()),
-                then_branch: Box::new(Statement::Return(Expression::IntegerConstant(1))),
-                else_branch: Some(Box::new(Statement::Return(Expression::IntegerConstant(2)))),
+                condition: typed(Expression::Var("b".to_string())),
+                then_branch: Box::new(Statement::Return(typed(Expression::IntegerConstant(1)))),
+                else_branch: Some(Box::new(Statement::Return(typed(Expression::IntegerConstant(2))))),
             }),
             else_branch: None,
         };
@@ -1240,7 +1241,7 @@ mod tests {
         let mut emitter = make_emitter();
         let stmt = Statement::While {
             loop_id: "loop.0".to_string(),
-            condition: Expression::IntegerConstant(1),
+            condition: typed(Expression::IntegerConstant(1)),
             body: Box::new(Statement::CompoundStatement(Block::new(vec![
                 BlockItem::Statement(Statement::Break {
                     loop_id: "loop.0".to_string(),
@@ -1281,7 +1282,7 @@ mod tests {
         let mut emitter = make_emitter();
         let stmt = Statement::DoWhile {
             loop_id: "loop.1".to_string(),
-            condition: Expression::IntegerConstant(1),
+            condition: typed(Expression::IntegerConstant(1)),
             body: Box::new(Statement::CompoundStatement(Block::new(vec![
                 BlockItem::Statement(Statement::Break {
                     loop_id: "loop.1".to_string(),
@@ -1318,10 +1319,10 @@ mod tests {
         use Value::*;
 
         let mut emitter = make_emitter();
-        let stmt = Statement::Return(Expression::FuncCall {
+        let stmt = Statement::Return(typed(Expression::FuncCall {
             name: "foo".to_string(),
             args: vec![],
-        });
+        }));
 
         let expected = vec![
             FunctionCall {
@@ -1344,17 +1345,17 @@ mod tests {
 
         let mut emitter = make_emitter();
         // bar(1, 2 + 3)
-        let stmt = Statement::Return(Expression::FuncCall {
+        let stmt = Statement::Return(typed(Expression::FuncCall {
             name: "bar".to_string(),
             args: vec![
-                Expression::IntegerConstant(1),
-                Expression::BinaryExpr(
+                typed(Expression::IntegerConstant(1)),
+                typed(Expression::BinaryExpr(
                     BinaryOp::Add,
-                    Box::new(Expression::IntegerConstant(2)),
-                    Box::new(Expression::IntegerConstant(3)),
-                ),
+                    Box::new(typed(Expression::IntegerConstant(2))),
+                    Box::new(typed(Expression::IntegerConstant(3))),
+                )),
             ],
-        });
+        }));
 
         let expected = vec![
             // evaluate 2 + 3 first
@@ -1386,7 +1387,7 @@ mod tests {
         let stmt = Statement::For {
             loop_id: "loop.2".to_string(),
             init: ForInit::InitExpression(None),
-            condition: Some(Expression::IntegerConstant(1)),
+            condition: Some(typed(Expression::IntegerConstant(1))),
             post: None,
             body: Box::new(Statement::CompoundStatement(Block::new(vec![
                 BlockItem::Statement(Statement::Break {

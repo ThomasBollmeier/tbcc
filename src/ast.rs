@@ -45,7 +45,7 @@ impl FunctionDeclaration {
 #[derive(Debug, Clone)]
 pub struct VarDeclaration {
     pub name: String,
-    pub init_expr: Option<Expression>,
+    pub init_expr: Option<TypedExpression>,
     pub storage_class: Option<StorageClass>,
     pub var_type: Type,
 }
@@ -53,7 +53,7 @@ pub struct VarDeclaration {
 impl VarDeclaration {
     pub fn new(
         name: String,
-        init_expr: Option<Expression>,
+        init_expr: Option<TypedExpression>,
         storage_class: Option<StorageClass>,
         var_type: Type,
     ) -> Self {
@@ -74,6 +74,7 @@ pub enum Type {
         return_type: Box<Type>,
         param_types: Vec<Type>,
     },
+    Undefined,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -102,8 +103,8 @@ pub enum BlockItem {
 
 #[derive(Debug, Clone)]
 pub enum Statement {
-    Return(Expression),
-    Expression(Expression),
+    Return(TypedExpression),
+    Expression(TypedExpression),
     Null,
     Break {
         loop_id: String,
@@ -113,32 +114,32 @@ pub enum Statement {
     },
     While {
         loop_id: String,
-        condition: Expression,
+        condition: TypedExpression,
         body: Box<Statement>,
     },
     DoWhile {
         loop_id: String,
-        condition: Expression,
+        condition: TypedExpression,
         body: Box<Statement>,
     },
     For {
         loop_id: String,
         init: ForInit,
-        condition: Option<Expression>,
-        post: Option<Expression>,
+        condition: Option<TypedExpression>,
+        post: Option<TypedExpression>,
         body: Box<Statement>,
     },
     CompoundStatement(Block),
     IfStatement {
-        condition: Expression,
+        condition: TypedExpression,
         then_branch: Box<Statement>,
         else_branch: Option<Box<Statement>>,
     },
     SwitchStatement {
         switch_id: String,
-        condition: Expression,
+        condition: TypedExpression,
         body: Box<Statement>,
-        arms: Vec<(String, Option<Expression>)>,
+        arms: Vec<(String, Option<TypedExpression>)>,
     },
     GotoStatement(String),
     LabeledStatement {
@@ -150,7 +151,7 @@ pub enum Statement {
 #[derive(Debug, Clone)]
 pub enum Label {
     Label(String),
-    Case { case_id: String, value: Expression }, // <-- to be used in switch statement
+    Case { case_id: String, value: TypedExpression }, // <-- to be used in switch statement
     Default { default_id: String },              // <-- to be used in switch statement
 }
 
@@ -163,7 +164,7 @@ impl Label {
         }
     }
 
-    pub fn get_case_value(&self) -> Option<&Expression> {
+    pub fn get_case_value(&self) -> Option<&TypedExpression> {
         match self {
             Label::Case { value, .. } => Some(value),
             _ => None,
@@ -174,7 +175,20 @@ impl Label {
 #[derive(Debug, Clone)]
 pub enum ForInit {
     InitDeclaration(VarDeclaration),
-    InitExpression(Option<Expression>),
+    InitExpression(Option<TypedExpression>),
+}
+
+#[derive(Debug, Clone)]
+pub struct TypedExpression(pub Expression, pub Type);
+
+impl TypedExpression {
+    pub fn new(expr: Expression) -> Self {
+        TypedExpression(expr, Type::Undefined)
+    }
+}
+
+pub fn typed(expression: Expression) -> TypedExpression {
+    TypedExpression::new(expression)
 }
 
 #[derive(Debug, Clone)]
@@ -182,25 +196,25 @@ pub enum Expression {
     IntegerConstant(i32),
     LongConstant(i64),
     Cast {
-        expr: Box<Expression>,
+        expr: Box<TypedExpression>,
         target_type: Type,
     },
     Var(String),
     FuncCall {
         name: String,
-        args: Vec<Expression>,
+        args: Vec<TypedExpression>,
     },
-    UnaryExpr(UnaryOp, Box<Expression>),
-    BinaryExpr(BinaryOp, Box<Expression>, Box<Expression>),
+    UnaryExpr(UnaryOp, Box<TypedExpression>),
+    BinaryExpr(BinaryOp, Box<TypedExpression>, Box<TypedExpression>),
     Assignment {
-        left: Box<Expression>,
-        right: Box<Expression>,
+        left: Box<TypedExpression>,
+        right: Box<TypedExpression>,
         is_postfix: bool,
     },
     ConditionalExpr {
-        condition: Box<Expression>,
-        then_expr: Box<Expression>,
-        else_expr: Box<Expression>,
+        condition: Box<TypedExpression>,
+        then_expr: Box<TypedExpression>,
+        else_expr: Box<TypedExpression>,
     },
 }
 

@@ -1,6 +1,6 @@
-use crate::ast::{Expression, Program, StorageClass};
+use crate::ast::{Expression, Program, StorageClass, Type, TypedExpression};
 use crate::semantic::symbol_table;
-use crate::semantic::symbol_table::{CType, IdentAttrs, InitialValue, SymbolTableEntry};
+use crate::semantic::symbol_table::{IdentAttrs, InitialValue, SymbolTableEntry};
 use crate::semantic::walker::{WalkerMut, walk};
 use anyhow::anyhow;
 
@@ -28,7 +28,7 @@ impl TypeChecker {
         decl: &mut crate::ast::VarDeclaration,
     ) -> anyhow::Result<()> {
         let init_value = match &decl.init_expr {
-            Some(init_expr) => match init_expr {
+            Some(TypedExpression(init_expr, _)) => match init_expr {
                 Expression::IntegerConstant(i) => Some(InitialValue::Initialized(*i)),
                 _ => {
                     return Err(anyhow!(
@@ -55,7 +55,7 @@ impl TypeChecker {
                 symbol_table::insert(
                     decl.name.clone(),
                     SymbolTableEntry {
-                        c_type: CType::Int,
+                        c_type: Type::Int,
                         attrs: IdentAttrs::Static {
                             init_value,
                             is_global,
@@ -78,7 +78,7 @@ impl TypeChecker {
         let mut is_global = is_global;
 
         match entry.c_type {
-            CType::Function { .. } => {
+            Type::Function { .. } => {
                 return Err(anyhow!(
                     "Name '{}' has already been declared as a function",
                     decl.name
@@ -161,7 +161,7 @@ impl TypeChecker {
 
         match symbol_table::get(&decl.name) {
             Some(entry) => match entry.c_type {
-                CType::Int { .. } => {}
+                Type::Int { .. } => {}
                 _ => {
                     return Err(anyhow!(
                         "Variable '{}' has already been declared as a non integer",
@@ -173,7 +173,7 @@ impl TypeChecker {
                 symbol_table::insert(
                     decl.name.clone(),
                     SymbolTableEntry {
-                        c_type: CType::Int,
+                        c_type: Type::Int,
                         attrs: IdentAttrs::Static {
                             init_value: None,
                             is_global: true,
@@ -191,7 +191,7 @@ impl TypeChecker {
         decl: &mut crate::ast::VarDeclaration,
     ) -> anyhow::Result<()> {
         let init_value = match &decl.init_expr {
-            Some(Expression::IntegerConstant(i)) => Some(InitialValue::Initialized(*i)),
+            Some(TypedExpression(Expression::IntegerConstant(i), _)) => Some(InitialValue::Initialized(*i)),
             Some(_) => return Err(anyhow!("Non-constant initializer for local static declaration of {}", decl.name)),
             None => Some(InitialValue::Initialized(0)),
         };
@@ -199,7 +199,7 @@ impl TypeChecker {
         symbol_table::insert(
             decl.name.clone(),
             SymbolTableEntry {
-                c_type: CType::Int,
+                c_type: Type::Int,
                 attrs: IdentAttrs::Static {
                     init_value,
                     is_global: false,
@@ -221,7 +221,7 @@ impl TypeChecker {
         symbol_table::insert(
             decl.name.clone(),
             SymbolTableEntry {
-                c_type: CType::Int,
+                c_type: Type::Int,
                 attrs: IdentAttrs::Local,
             },
         );
@@ -257,9 +257,11 @@ impl WalkerMut for TypeChecker {
                     ));
                 }
                 match c_type {
-                    CType::Function {
-                        num_params: num_params_other,
+                    Type::Function {
+                        param_types,
+                        ..
                     } => {
+                        let num_params_other = param_types.len();
                         if num_params_other != num_params {
                             return Err(anyhow!(
                                 "Function '{}' declared with {} parameters, but previous declaration has {} parameters",
@@ -278,11 +280,9 @@ impl WalkerMut for TypeChecker {
                             // Update the symbol table entry to mark the function as defined
                             symbol_table::with_global_symbol_table_mut(|table| {
                                 table.modify(&func_decl.name).and_modify(|entry| {
-                                    if let CType::Function { num_params } = &mut entry.c_type {
+                                    if let Type::Function { .. } = &mut entry.c_type {
                                         *entry = SymbolTableEntry {
-                                            c_type: CType::Function {
-                                                num_params: *num_params,
-                                            },
+                                            c_type: entry.c_type.clone(),
                                             attrs: IdentAttrs::Function {
                                                 is_defined: true,
                                                 is_global: is_global_other,
@@ -296,7 +296,7 @@ impl WalkerMut for TypeChecker {
                                 symbol_table::insert(
                                     param.clone(),
                                     SymbolTableEntry {
-                                        c_type: CType::Int,
+                                        c_type: Type::Int,
                                         attrs: IdentAttrs::Local,
                                     },
                                 );
@@ -312,10 +312,11 @@ impl WalkerMut for TypeChecker {
                 }
             }
             None => {
+
                 symbol_table::insert(
                     func_decl.name.clone(),
                     SymbolTableEntry {
-                        c_type: CType::Function { num_params },
+                        c_type: func_decl.func_type.clone(),
                         attrs: IdentAttrs::Function {
                             is_defined: is_func_defined,
                             is_global,
@@ -328,7 +329,7 @@ impl WalkerMut for TypeChecker {
                         symbol_table::insert(
                             param.clone(),
                             SymbolTableEntry {
-                                c_type: CType::Int,
+                                c_type: Type::Int,
                                 attrs: IdentAttrs::Local,
                             },
                         );
@@ -364,13 +365,15 @@ impl WalkerMut for TypeChecker {
             Expression::Var(name) => {
                 if let Some(entry) = symbol_table::get(name) {
                     match entry.c_type {
-                        CType::Int => {}
-                        CType::Function { .. } => {
+                        Type::Int => {}
+                        Type::Long => {}
+                        Type::Function { .. } => {
                             return Err(anyhow!(
                                 "Identifier '{}' is a function, but used as a variable",
                                 name
                             ));
                         }
+                        Type::Undefined => return Err(anyhow!("variable '{}' has an undefined type", name)),
                     }
                 } else {
                     return Err(anyhow!("Undefined variable '{}'", name));
@@ -379,21 +382,24 @@ impl WalkerMut for TypeChecker {
             Expression::FuncCall { name, args } => {
                 if let Some(entry) = symbol_table::get(name) {
                     match entry.c_type {
-                        CType::Function { num_params } => {
-                            if args.len() != num_params {
+                        Type::Function { param_types, .. } => {
+                            if args.len() != param_types.len() {
                                 return Err(anyhow!(
                                     "Function '{}' called with {} arguments, but expects {}",
                                     name,
                                     args.len(),
-                                    num_params
+                                    param_types.len()
                                 ));
                             }
                         }
-                        CType::Int => {
+                        Type::Int | Type::Long => {
                             return Err(anyhow!(
                                 "Identifier '{}' is a variable, but used as a function",
                                 name
                             ));
+                        }
+                        Type::Undefined => {
+                            return Err(anyhow!("call to function '{}' has an undefined type", name));
                         }
                     }
                 } else {

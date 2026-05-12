@@ -192,7 +192,7 @@ impl ResolutionStrategy<LabelAdditionalData> for LabelStrategy {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ast::{BlockItem, Declaration, Expression, Statement};
+    use crate::ast::{BlockItem, Declaration, Expression, Statement, TypedExpression};
     use crate::lexer::Lexer;
     use crate::parser::Parser;
     use crate::semantic::IdentifierResolver;
@@ -216,7 +216,8 @@ mod tests {
         let main_func = if let Declaration::FunctionDecl(func_decl) = program
             .decls
             .get(0)
-            .expect("Expected main function to be present") {
+            .expect("Expected main function to be present")
+        {
             func_decl
         } else {
             unreachable!()
@@ -240,7 +241,10 @@ mod tests {
                 match then_branch.as_ref() {
                     Statement::LabeledStatement { label, statement } => {
                         match statement.as_ref() {
-                            Statement::Return(Expression::IntegerConstant(5)) => {}
+                            Statement::Return(TypedExpression(
+                                Expression::IntegerConstant(5),
+                                _,
+                            )) => {}
                             _ => panic!("Expected labeled statement to wrap 'return 5'"),
                         }
                         label.clone()
@@ -263,7 +267,10 @@ mod tests {
         }
 
         match &body[2] {
-            BlockItem::Statement(Statement::Return(Expression::IntegerConstant(0))) => {}
+            BlockItem::Statement(Statement::Return(TypedExpression(
+                Expression::IntegerConstant(0),
+                _,
+            ))) => {}
             _ => panic!("Expected third body item to be 'return 0'"),
         }
     }

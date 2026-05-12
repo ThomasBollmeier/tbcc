@@ -1,4 +1,6 @@
-use crate::ast::{Block, Expression, FunctionDeclaration, Program, Statement, StorageClass, VarDeclaration};
+use crate::ast::{
+    Block, Expression, FunctionDeclaration, Program, Statement, StorageClass, VarDeclaration,
+};
 use crate::semantic::name_generator::NameGeneratorRef;
 use crate::semantic::scope::{ResolutionStrategy, Scope, ScopeRef};
 use crate::semantic::walker;
@@ -49,7 +51,9 @@ impl WalkerMut for IdentifierResolver {
             return Err(anyhow!("Nested function definitions are not allowed"));
         }
 
-        if let Some(StorageClass::Static) = func_decl.storage_class && self.in_block_scope() {
+        if let Some(StorageClass::Static) = func_decl.storage_class
+            && self.in_block_scope()
+        {
             return Err(anyhow!("Static functions cannot be defined in block scope"));
         }
 
@@ -107,8 +111,13 @@ impl WalkerMut for IdentifierResolver {
     }
 
     fn enter_declaration(&mut self, decl: &mut VarDeclaration) -> Result<()> {
-        if let Some(StorageClass::Extern) = decl.storage_class && self.in_block_scope() && decl.init_expr.is_some()  {
-            return Err(anyhow!("Extern variables cannot have initializers in block scope"));
+        if let Some(StorageClass::Extern) = decl.storage_class
+            && self.in_block_scope()
+            && decl.init_expr.is_some()
+        {
+            return Err(anyhow!(
+                "Extern variables cannot have initializers in block scope"
+            ));
         }
 
         let additional_data = IdentifierAdditional {
@@ -151,7 +160,7 @@ impl WalkerMut for IdentifierResolver {
                 left,
                 right: _,
                 is_postfix: _,
-            } => match **left {
+            } => match left.0 {
                 Var(_) => {}
                 _ => return Err(anyhow!("Left-hand side of assignment must be a variable")),
             },
@@ -230,7 +239,7 @@ impl ResolutionStrategy<IdentifierAdditional> for IdentifierStrategy {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ast::{BlockItem, Declaration, Expression, Statement};
+    use crate::ast::{BlockItem, Declaration, Expression, Statement, TypedExpression};
     use crate::lexer::Lexer;
     use crate::parser::Parser;
     use crate::semantic::name_generator::make_var_name_generator;
@@ -275,7 +284,7 @@ mod tests {
             BlockItem::VarDeclaration(decl) => {
                 assert_eq!(decl.name, "var.y.0");
                 match decl.init_expr.as_ref() {
-                    Some(Expression::Var(name)) => assert_eq!(name, "var.x.0"),
+                    Some(TypedExpression(Expression::Var(name), _)) => assert_eq!(name, "var.x.0"),
                     _ => panic!("Expected initializer to be variable expression"),
                 }
             }
@@ -283,16 +292,19 @@ mod tests {
         }
 
         match &body[2] {
-            BlockItem::Statement(Statement::Expression(Expression::Assignment {
-                left,
-                right,
-                is_postfix: _,
-            })) => {
-                match left.as_ref() {
+            BlockItem::Statement(Statement::Expression(TypedExpression(
+                Expression::Assignment {
+                    left,
+                    right,
+                    is_postfix: _,
+                },
+                _,
+            ))) => {
+                match &left.as_ref().0 {
                     Expression::Var(name) => assert_eq!(name, "var.x.0"),
                     _ => panic!("Expected assignment left side to be variable"),
                 }
-                match right.as_ref() {
+                match &right.as_ref().0 {
                     Expression::Var(name) => assert_eq!(name, "var.y.0"),
                     _ => panic!("Expected assignment right side to be variable"),
                 }
@@ -301,7 +313,7 @@ mod tests {
         }
 
         match &body[3] {
-            BlockItem::Statement(Statement::Return(Expression::Var(name))) => {
+            BlockItem::Statement(Statement::Return(TypedExpression(Expression::Var(name), _))) => {
                 assert_eq!(name, "var.x.0")
             }
             _ => panic!("Expected fourth item to be return variable statement"),

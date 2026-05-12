@@ -1,8 +1,5 @@
 use crate::ast::Statement::{For, IfStatement, Return, SwitchStatement};
-use crate::ast::{
-    Associativity, BinaryOp, Block, BlockItem, Declaration, Expression, ForInit,
-    FunctionDeclaration, Label, Program, Statement, StorageClass, Type, UnaryOp, VarDeclaration,
-};
+use crate::ast::{typed, Associativity, BinaryOp, Block, BlockItem, Declaration, Expression, ForInit, FunctionDeclaration, Label, Program, Statement, StorageClass, Type, TypedExpression, UnaryOp, VarDeclaration};
 use crate::token::{Token, TokenStream, TokenType, TokenValue};
 use anyhow::{Result, anyhow};
 use std::collections::HashSet;
@@ -454,11 +451,11 @@ impl Parser {
         })
     }
 
-    fn for_post(&self, stream: &mut TokenStream) -> Result<Option<Expression>> {
+    fn for_post(&self, stream: &mut TokenStream) -> Result<Option<TypedExpression>> {
         self.get_optional_expression(stream, TokenType::RightParen)
     }
 
-    fn for_condition(&self, stream: &mut TokenStream) -> Result<Option<Expression>> {
+    fn for_condition(&self, stream: &mut TokenStream) -> Result<Option<TypedExpression>> {
         self.get_optional_expression(stream, TokenType::Semicolon)
     }
 
@@ -466,7 +463,7 @@ impl Parser {
         &self,
         stream: &mut TokenStream,
         terminator_type: TokenType,
-    ) -> Result<Option<Expression>> {
+    ) -> Result<Option<TypedExpression>> {
         let token = stream
             .peek()
             .ok_or_else(|| anyhow!("Unexpected end of input in for-loop initializer"))?;
@@ -551,7 +548,7 @@ impl Parser {
         })
     }
 
-    fn expression(&self, stream: &mut TokenStream, min_precedence: i32) -> Result<Expression> {
+    fn expression(&self, stream: &mut TokenStream, min_precedence: i32) -> Result<TypedExpression> {
         use BinaryOp::*;
         let mut left = self.factor(stream)?;
 
@@ -582,33 +579,33 @@ impl Parser {
 
             let right = self.expression(stream, next_min_prec)?;
             left = match op {
-                Assign => Expression::Assignment {
+                Assign => typed(Expression::Assignment {
                     left: Box::new(left),
                     right: Box::new(right),
                     is_postfix: false,
-                },
+                }),
                 Conditional => {
                     let then_expr = then_expr_opt.ok_or_else(|| {
                         anyhow!("Expected then-expression for conditional operator")
                     })?;
-                    Expression::ConditionalExpr {
+                    typed(Expression::ConditionalExpr {
                         condition: Box::new(left),
                         then_expr: Box::new(then_expr),
                         else_expr: Box::new(right),
-                    }
+                    })
                 }
                 AssignAdd | AssignSubtract | AssignMultiply | AssignDivide | AssignRemainder
                 | AssignBitAnd | AssignBitOr | AssignBitXor | AssignShiftLeft
-                | AssignShiftRight => Expression::Assignment {
+                | AssignShiftRight => typed(Expression::Assignment {
                     left: Box::new(left.clone()),
-                    right: Box::new(Expression::BinaryExpr(
+                    right: Box::new(typed(Expression::BinaryExpr(
                         self.get_binary_op_from_compound(&op)?,
                         Box::new(left),
                         Box::new(right),
-                    )),
+                    ))),
                     is_postfix: false,
-                },
-                _ => Expression::BinaryExpr(op, Box::new(left), Box::new(right)),
+                }),
+                _ => typed(Expression::BinaryExpr(op, Box::new(left), Box::new(right))),
             };
         }
 
@@ -699,19 +696,19 @@ impl Parser {
         }
     }
 
-    fn factor(&self, stream: &mut TokenStream) -> Result<Expression> {
+    fn factor(&self, stream: &mut TokenStream) -> Result<TypedExpression> {
         let token = self.consume(stream)?;
         let mut expr = match token.token_type {
             TokenType::IntegerConstant => {
                 if let Some(TokenValue::Integer(value)) = token.value {
-                    Expression::IntegerConstant(value)
+                    typed(Expression::IntegerConstant(value))
                 } else {
                     return Err(anyhow!("Expected integer constant value"));
                 }
             }
             TokenType::LongConstant => {
                 if let Some(TokenValue::Long(value)) = token.value {
-                    Expression::LongConstant(value)
+                    typed(Expression::LongConstant(value))
                 } else {
                     return Err(anyhow!("Expected long integer constant value"));
                 }
@@ -724,17 +721,17 @@ impl Parser {
                     false
                 };
                 if is_func_call {
-                    Expression::FuncCall {
+                    typed(Expression::FuncCall {
                         name,
                         args: self.argument_list(stream)?,
-                    }
+                    })
                 } else {
-                    Expression::Var(name)
+                    typed(Expression::Var(name))
                 }
             }
             TokenType::Minus | TokenType::Tilde | TokenType::LogicalNot => {
                 let op = self.get_unary_op(&token.token_type).unwrap();
-                Expression::UnaryExpr(op, Box::new(self.factor(stream)?))
+                typed(Expression::UnaryExpr(op, Box::new(self.factor(stream)?)))
             }
             TokenType::IncrementPrefix | TokenType::DecrementPrefix => {
                 let op = if token.token_type == TokenType::IncrementPrefix {
@@ -743,15 +740,15 @@ impl Parser {
                     BinaryOp::Subtract
                 };
                 let expr = self.factor(stream)?;
-                Expression::Assignment {
+                typed(Expression::Assignment {
                     left: Box::new(expr.clone()),
-                    right: Box::new(Expression::BinaryExpr(
+                    right: Box::new(typed(Expression::BinaryExpr(
                         op,
                         Box::new(expr),
-                        Box::new(Expression::IntegerConstant(1)),
-                    )),
+                        Box::new(typed(Expression::IntegerConstant(1))),
+                    ))),
                     is_postfix: false,
-                }
+                })
             }
             TokenType::LeftParen => {
                 let type_specifiers = self.type_specifiers(stream)?;
@@ -760,10 +757,10 @@ impl Parser {
                     let target_type = Self::type_from_specifiers(&type_specifiers)?;
                     self.expect(stream, TokenType::RightParen)?;
                     let expr = self.factor(stream)?;
-                    Expression::Cast {
+                    typed(Expression::Cast {
                         expr: Box::new(expr),
                         target_type,
-                    }
+                    })
                 } else {
                     // Grouping:
                     let expr = self.expression(stream, 0)?;
@@ -792,7 +789,7 @@ impl Parser {
         Ok(expr)
     }
 
-    fn argument_list(&self, stream: &mut TokenStream) -> Result<Vec<Expression>> {
+    fn argument_list(&self, stream: &mut TokenStream) -> Result<Vec<TypedExpression>> {
         let mut args = Vec::new();
         self.expect(stream, TokenType::LeftParen)?;
         loop {
@@ -816,16 +813,16 @@ impl Parser {
         Ok(args)
     }
 
-    fn create_postfix_assignment(&self, op: BinaryOp, expr: &Expression) -> Expression {
-        Expression::Assignment {
+    fn create_postfix_assignment(&self, op: BinaryOp, expr: &TypedExpression) -> TypedExpression {
+        typed(Expression::Assignment {
             left: Box::new(expr.clone()),
-            right: Box::new(Expression::BinaryExpr(
+            right: Box::new(typed(Expression::BinaryExpr(
                 op,
                 Box::new(expr.clone()),
-                Box::new(Expression::IntegerConstant(1)),
-            )),
+                Box::new(typed(Expression::IntegerConstant(1))),
+            ))),
             is_postfix: true,
-        }
+        })
     }
 
     fn expect(&self, stream: &mut TokenStream, expected_type: TokenType) -> Result<Token> {
