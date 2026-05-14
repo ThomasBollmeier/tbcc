@@ -360,13 +360,25 @@ impl WalkerMut for TypeChecker {
         }
     }
 
+    fn enter_typed_expression(&mut self, typed_expr: &mut TypedExpression) -> anyhow::Result<()> {
+        match &typed_expr.0 {
+            Expression::Var(name) => {
+                if let Some(entry) = symbol_table::get(name) {
+                    typed_expr.set_type(entry.c_type.clone());
+                } else {
+                    return Err(anyhow!("Undefined variable '{}'", name));
+                }
+            }
+            _ => {}
+        }
+        Ok(())
+    }
+
     fn enter_expression(&mut self, expr: &mut Expression) -> anyhow::Result<()> {
         match expr {
             Expression::Var(name) => {
                 if let Some(entry) = symbol_table::get(name) {
                     match entry.c_type {
-                        Type::Int => {}
-                        Type::Long => {}
                         Type::Function { .. } => {
                             return Err(anyhow!(
                                 "Identifier '{}' is a function, but used as a variable",
@@ -374,6 +386,7 @@ impl WalkerMut for TypeChecker {
                             ));
                         }
                         Type::Undefined => return Err(anyhow!("variable '{}' has an undefined type", name)),
+                        _ => {}
                     }
                 } else {
                     return Err(anyhow!("Undefined variable '{}'", name));

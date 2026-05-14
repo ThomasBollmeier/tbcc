@@ -1,3 +1,6 @@
+use crate::semantic::visitor::VisitorMut;
+use anyhow::Result;
+
 #[derive(Debug, Clone)]
 pub struct Program {
     pub decls: Vec<Declaration>,
@@ -7,12 +10,25 @@ impl Program {
     pub fn new() -> Self {
         Program { decls: vec![] }
     }
+
+    pub fn accept_mut(&mut self, visitor: &mut impl VisitorMut) -> Result<()> {
+        visitor.visit_program(self)
+    }
 }
 
 #[derive(Debug, Clone)]
 pub enum Declaration {
     FunctionDecl(FunctionDeclaration),
     VarDecl(VarDeclaration),
+}
+
+impl Declaration {
+    pub fn accept_mut(&mut self, visitor: &mut impl VisitorMut) -> Result<()> {
+        match self {
+            Declaration::FunctionDecl(func_decl) => func_decl.accept_mut(visitor),
+            Declaration::VarDecl(var_decl) => var_decl.accept_mut(visitor),
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -40,6 +56,10 @@ impl FunctionDeclaration {
             func_type,
         }
     }
+
+    pub fn accept_mut(&mut self, visitor: &mut impl VisitorMut) -> Result<()> {
+        visitor.visit_function_declaration(self)
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -48,6 +68,12 @@ pub struct VarDeclaration {
     pub init_expr: Option<TypedExpression>,
     pub storage_class: Option<StorageClass>,
     pub var_type: Type,
+}
+
+impl VarDeclaration {
+    pub fn accept_mut(&mut self, visitor: &mut impl VisitorMut) -> Result<()> {
+        visitor.visit_var_declaration(self)
+    }
 }
 
 impl VarDeclaration {
@@ -92,6 +118,13 @@ impl Block {
     pub fn new(items: Vec<BlockItem>) -> Self {
         Block { items }
     }
+
+    pub fn accept_mut(&mut self, visitor: &mut impl VisitorMut) -> Result<()> {
+        for item in &mut self.items {
+            item.accept_mut(visitor)?;
+        }
+        Ok(())
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -99,6 +132,16 @@ pub enum BlockItem {
     VarDeclaration(VarDeclaration),
     FunctionDeclaration(FunctionDeclaration),
     Statement(Statement),
+}
+
+impl BlockItem {
+    pub fn accept_mut(&mut self, visitor: &mut impl VisitorMut) -> Result<()> {
+        match self {
+            BlockItem::VarDeclaration(var_decl) => var_decl.accept_mut(visitor),
+            BlockItem::FunctionDeclaration(function_decl) => function_decl.accept_mut(visitor),
+            BlockItem::Statement(stmt) => stmt.accept_mut(visitor),
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -148,14 +191,32 @@ pub enum Statement {
     },
 }
 
+impl Statement {
+    pub fn accept_mut(&mut self, visitor: &mut impl VisitorMut) -> Result<()> {
+        visitor.visit_statement(self)
+    }
+}
+
 #[derive(Debug, Clone)]
 pub enum Label {
     Label(String),
-    Case { case_id: String, value: TypedExpression }, // <-- to be used in switch statement
-    Default { default_id: String },              // <-- to be used in switch statement
+    Case {
+        case_id: String,
+        value: TypedExpression,
+    }, // <-- to be used in switch statement
+    Default {
+        default_id: String,
+    }, // <-- to be used in switch statement
 }
 
 impl Label {
+    pub fn accept_mut(&mut self, visitor: &mut impl VisitorMut) -> Result<()> {
+        match self {
+            Label::Case { value, .. } => value.accept_mut(visitor),
+            _ => Ok(()),
+        }
+    }
+
     pub fn get_name(&self) -> String {
         match self {
             Label::Label(name) => name.clone(),
@@ -178,12 +239,43 @@ pub enum ForInit {
     InitExpression(Option<TypedExpression>),
 }
 
+impl ForInit {
+    pub fn accept_mut(&mut self, visitor: &mut impl VisitorMut) -> Result<()> {
+        match self {
+            ForInit::InitDeclaration(var_decl) => var_decl.accept_mut(visitor),
+            ForInit::InitExpression(expr_opt) => {
+                if let Some(expr) = expr_opt {
+                    expr.accept_mut(visitor)
+                } else {
+                    Ok(())
+                }
+            }
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct TypedExpression(pub Expression, pub Type);
 
 impl TypedExpression {
     pub fn new(expr: Expression) -> Self {
         TypedExpression(expr, Type::Undefined)
+    }
+
+    pub fn with_type(expr: Expression, c_type: Type) -> Self {
+        TypedExpression(expr, c_type)
+    }
+
+    pub fn accept_mut(&mut self, visitor: &mut impl VisitorMut) -> Result<()> {
+        visitor.visit_typed_expression(self)
+    }
+
+    pub fn get_type(&self) -> Type {
+        self.1.clone()
+    }
+
+    pub fn set_type(&mut self, c_type: Type) {
+        self.1 = c_type;
     }
 }
 

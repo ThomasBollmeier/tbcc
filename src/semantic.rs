@@ -2,6 +2,7 @@ use crate::ast::Program;
 use anyhow::Result;
 
 mod walker;
+pub(crate) mod visitor;
 mod label_resolver;
 mod name_generator;
 mod scope;
@@ -9,6 +10,7 @@ mod identifier_resolver;
 mod loop_labeler;
 pub mod symbol_table;
 mod type_checker;
+mod type_checker_new;
 
 pub use label_resolver::LabelResolver;
 pub use name_generator::{
