@@ -1,7 +1,7 @@
-use crate::ast::Expression::{Cast, FuncCall};
+use crate::ast::Expression::{BinaryExpr, Cast, FuncCall};
 use crate::ast::{
-    Expression, FunctionDeclaration, Program, Statement, StorageClass, Type, TypedExpression,
-    UnaryOp, VarDeclaration,
+    BinaryOp, Expression, ForInit, FunctionDeclaration, Program, Statement, StorageClass, Type,
+    TypedExpression, UnaryOp, VarDeclaration,
 };
 use crate::semantic::symbol_table;
 use crate::semantic::symbol_table::{IdentAttrs, InitValue, InitialValue, SymbolTableEntry};
@@ -10,12 +10,14 @@ use anyhow::{Result, anyhow};
 
 pub struct TypeChecker {
     current_function: Option<FunctionDeclaration>,
+    is_for_init_decl: bool,
 }
 
 impl TypeChecker {
     pub fn new() -> Self {
         Self {
             current_function: None,
+            is_for_init_decl: false,
         }
     }
 
@@ -162,6 +164,15 @@ impl TypeChecker {
             ));
         }
 
+        for (param_type, param_type_other) in param_types.iter().zip(param_types_other) {
+            if param_type != param_type_other {
+                return Err(anyhow!(
+                    "function '{}' has a different signature than previous declaration",
+                    func_decl.name
+                ));
+            }
+        }
+
         Ok(())
     }
 
@@ -219,14 +230,11 @@ impl TypeChecker {
         let mut init_value = init_value;
         let mut is_global = is_global;
 
-        match entry.c_type {
-            Type::Function { .. } => {
-                return Err(anyhow!(
-                    "Name '{}' has already been declared as a function",
-                    decl.name
-                ));
-            }
-            _ => {}
+        if entry.c_type != decl.var_type {
+            return Err(anyhow!(
+                "variable '{}' has already been declared with a different type",
+                decl.name
+            ));
         }
 
         if let Some(IdentAttrs::Static {
@@ -280,6 +288,12 @@ impl TypeChecker {
     }
 
     fn check_var_decl_block_scope(&self, decl: &mut VarDeclaration) -> Result<()> {
+        if self.is_for_init_decl && decl.storage_class.is_some() {
+            return Err(anyhow!(
+                "variable declaration in for-loop initializer cannot have a extern or static specifier"
+            ));
+        }
+
         match decl.storage_class {
             Some(StorageClass::Extern) => self.check_var_decl_block_scope_extern(decl),
             Some(StorageClass::Static) => self.check_var_decl_block_scope_static(decl),
@@ -382,6 +396,17 @@ impl TypeChecker {
         )
     }
 
+    fn get_common_type(type_a: &Type, type_b: &Type) -> Type {
+        if type_a == type_b {
+            return type_a.clone();
+        }
+
+        match (type_a, type_b) {
+            (Type::Int, Type::Long) | (Type::Long, Type::Int) => Type::Long,
+            _ => Type::Undefined,
+        }
+    }
+
     fn set_type(&mut self, typed_expr: &TypedExpression) -> Result<TypedExpression> {
         use Expression::*;
 
@@ -392,8 +417,118 @@ impl TypeChecker {
             Var(name) => self.set_type_var(name, typed_expr),
             FuncCall { name, args } => self.set_type_function_call(name, args),
             UnaryExpr(unary_op, operand) => self.set_type_unary(unary_op, operand),
-            _ => Ok(typed_expr.clone()),
+            BinaryExpr(binary_op, left, right) => self.set_type_binary(binary_op, left, right),
+            Assignment {
+                left,
+                right,
+                is_postfix,
+            } => self.set_type_assignment(left, right, *is_postfix),
+            ConditionalExpr {
+                condition,
+                then_expr,
+                else_expr,
+            } => self.set_type_conditional(condition, then_expr, else_expr),
         }
+    }
+
+    fn set_type_conditional(
+        &mut self,
+        condition: &TypedExpression,
+        then_expr: &TypedExpression,
+        else_expr: &TypedExpression,
+    ) -> Result<TypedExpression> {
+        let condition = self.set_type(condition)?;
+        let then_expr = self.set_type(then_expr)?;
+        let else_expr = self.set_type(else_expr)?;
+
+        let common_type = Self::get_common_type(&then_expr.get_type(), &else_expr.get_type());
+
+        Ok(TypedExpression::with_type(
+            Expression::ConditionalExpr {
+                condition: Box::new(condition),
+                then_expr: Box::new(Self::convert_to(&then_expr, &common_type)),
+                else_expr: Box::new(Self::convert_to(&else_expr, &common_type)),
+            },
+            common_type,
+        ))
+    }
+
+    fn set_type_assignment(
+        &mut self,
+        left: &TypedExpression,
+        right: &TypedExpression,
+        is_postfix: bool,
+    ) -> Result<TypedExpression> {
+        let left = self.set_type(left)?;
+        let left_type = left.get_type();
+        let right = Self::convert_to(&self.set_type(right)?, &left_type);
+
+        Ok(TypedExpression::with_type(
+            Expression::Assignment {
+                left: Box::new(left),
+                right: Box::new(right),
+                is_postfix,
+            },
+            left_type,
+        ))
+    }
+
+    fn set_type_binary(
+        &mut self,
+        binary_op: &BinaryOp,
+        left: &TypedExpression,
+        right: &TypedExpression,
+    ) -> Result<TypedExpression> {
+        let left = self.set_type(left)?;
+        let right = self.set_type(right)?;
+
+        match binary_op {
+            BinaryOp::LogicalAnd | BinaryOp::LogicalOr => {
+                return Ok(TypedExpression::with_type(
+                    BinaryExpr(binary_op.clone(), Box::new(left), Box::new(right)),
+                    Type::Int,
+                ));
+            }
+            _ => {}
+        }
+
+        let mut binary_type = Self::get_common_type(&left.get_type(), &right.get_type());
+        let left = Self::convert_to(&left, &binary_type);
+        let right = Self::convert_to(&right, &binary_type);
+
+        match binary_op {
+            BinaryOp::Add
+            | BinaryOp::Subtract
+            | BinaryOp::Multiply
+            | BinaryOp::Divide
+            | BinaryOp::Remainder => {
+                // Check operator types:
+                match left.get_type() {
+                    Type::Function { .. } | Type::Undefined => {
+                        return Err(anyhow!(
+                            "Cannot apply arithmetic operator to non-number type"
+                        ));
+                    }
+                    _ => {}
+                }
+                match right.get_type() {
+                    Type::Function { .. } | Type::Undefined => {
+                        return Err(anyhow!(
+                            "Cannot apply arithmetic operator to non-number type"
+                        ));
+                    }
+                    _ => {}
+                }
+            }
+            _ => {
+                binary_type = Type::Int;
+            }
+        }
+
+        Ok(TypedExpression::with_type(
+            BinaryExpr(binary_op.clone(), Box::new(left), Box::new(right)),
+            binary_type,
+        ))
     }
 
     fn set_type_unary(
@@ -512,6 +647,23 @@ impl TypeChecker {
             None => Err(anyhow!("return statement outside of function")),
         }
     }
+
+    fn set_type_for_init(&mut self, for_init: &ForInit) -> Result<ForInit> {
+        match for_init {
+            ForInit::InitExpression(Some(expr)) => {
+                let new_expr = self.set_type(expr)?;
+                Ok(ForInit::InitExpression(Some(new_expr)))
+            }
+            ForInit::InitExpression(None) => Ok(ForInit::InitExpression(None)),
+            ForInit::InitDeclaration(var_decl) => {
+                let mut new_var_decl = var_decl.clone();
+                self.is_for_init_decl = true;
+                new_var_decl.accept_mut(self)?;
+                self.is_for_init_decl = false;
+                Ok(ForInit::InitDeclaration(new_var_decl))
+            }
+        }
+    }
 }
 
 impl VisitorMut for TypeChecker {
@@ -568,10 +720,18 @@ impl VisitorMut for TypeChecker {
 
     fn visit_var_declaration(&mut self, var_decl: &mut VarDeclaration) -> Result<()> {
         if self.in_file_scope() {
-            self.check_var_decl_file_scope(var_decl)
+            self.check_var_decl_file_scope(var_decl)?;
         } else {
-            self.check_var_decl_block_scope(var_decl)
+            self.check_var_decl_block_scope(var_decl)?;
         }
+
+        // Type check of init expression must be done after the insert into the symbol table!
+        if let Some(init_expr) = &var_decl.init_expr {
+            let init_expr =
+                Self::convert_to(&self.set_type(init_expr)?, &var_decl.var_type.clone());
+            var_decl.init_expr = Some(init_expr);
+        }
+        Ok(())
     }
 
     fn visit_statement(&mut self, stmt: &mut Statement) -> Result<()> {
@@ -600,12 +760,13 @@ impl VisitorMut for TypeChecker {
                 *condition = self.set_type(condition)?;
             }
             For {
-                init: _init,
+                init,
                 condition,
                 post,
                 body,
                 ..
             } => {
+                *init = self.set_type_for_init(init)?;
                 if let Some(condition) = condition {
                     *condition = self.set_type(condition)?;
                 }
@@ -661,7 +822,7 @@ mod tests {
     use crate::lexer::Lexer;
     use crate::parser::Parser;
     use crate::semantic::type_checker::TypeChecker;
-    use crate::semantic::{IdentifierResolver, make_var_name_generator};
+    use crate::semantic::{IdentifierResolver, make_var_name_generator, symbol_table};
     use anyhow::Result;
 
     #[test]
@@ -699,11 +860,59 @@ mod tests {
         check_code(code).expect("Expected code to type check successfully");
     }
 
+    #[test]
+    fn divide_by_function_fails() {
+        let code = r#"
+        int x(void);
+
+        int main(void) {
+            int a = 10 / x;
+            return 0;
+        }
+        "#;
+
+        check_code(code).expect_err("Expected code to fail type checking");
+    }
+
+    #[test]
+    fn conflicting_functions_fail() {
+        let code = r#"
+        int x(int y);
+        int x(void);
+
+        int main(void) {
+            return x(42);
+        }
+        "#;
+
+        check_code(code).expect_err("Expected code to fail type checking");
+    }
+
+    #[test]
+    fn conflicting_global_types_fail() {
+        let code = r#"
+        int foo = 3;
+
+        /* It's illegal to declare the same variable
+         * with different types
+         */
+        long foo;
+
+        int main(void) {
+            return foo;
+        }
+        "#;
+
+        check_code(code).expect_err("Expected code to fail type checking");
+    }
+
     fn check_code(code: &str) -> Result<Program> {
         let lexer = Lexer::new();
         let parser = Parser::new();
         let tokens = lexer.scan_tokens(code)?;
         let mut program = parser.parse(tokens)?;
+
+        symbol_table::clear();
 
         let var_name_generator = make_var_name_generator();
         let mut resolver = IdentifierResolver::new(var_name_generator);
