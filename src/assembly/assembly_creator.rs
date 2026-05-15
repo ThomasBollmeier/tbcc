@@ -432,6 +432,7 @@ impl AssemblyCreator {
     fn create_operand(&mut self, value: &Value) -> Operand {
         match value {
             Value::IntegerConstant(i) => Operand::Immediate(*i),
+            Value::LongConstant(_l) => todo!("long constants not supported yet"),
             Value::Variable(name) => Operand::PseudoReg(name.clone()),
         }
     }

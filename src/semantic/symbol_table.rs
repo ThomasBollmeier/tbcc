@@ -94,7 +94,13 @@ pub enum IdentAttrs {
 #[derive(Debug, Clone)]
 pub enum InitialValue {
     Tentative,
-    Initialized(i32),
+    Initialized(InitValue),
+}
+
+#[derive(Debug, Clone)]
+pub enum InitValue {
+    Int(i32),
+    Long(i64),
 }
 
 #[cfg(test)]

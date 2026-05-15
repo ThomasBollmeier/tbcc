@@ -1,8 +1,8 @@
 use super::ast::Instruction::Unary;
-use super::ast::Value::IntegerConstant;
+use super::ast::Value::{IntegerConstant, LongConstant};
 use super::ast::{BinaryOperator, Function, Instruction, Program, TopLevel, UnaryOperator, Value};
 use crate::ast::{BinaryOp, Block, BlockItem, Expression, ForInit, FunctionDeclaration, Label, Statement, StorageClass, TypedExpression, UnaryOp, VarDeclaration};
-use crate::semantic::symbol_table::{IdentAttrs, InitialValue};
+use crate::semantic::symbol_table::{IdentAttrs, InitValue, InitialValue};
 use crate::semantic::{NameGeneratorRef, symbol_table};
 use anyhow::{Result, anyhow};
 
@@ -52,7 +52,8 @@ impl TackyEmitter {
                         init_value,
                     } => {
                         let initial_value = match init_value {
-                            Some(InitialValue::Initialized(ival)) => IntegerConstant(*ival),
+                            Some(InitialValue::Initialized(InitValue::Int(ival))) => IntegerConstant(*ival),
+                            Some(InitialValue::Initialized(InitValue::Long(lval))) => LongConstant(*lval),
                             Some(InitialValue::Tentative) => IntegerConstant(0),
                             None => return None,
                         };
@@ -439,6 +440,10 @@ impl TackyEmitter {
             Expression::FuncCall { name, args } => {
                 self.emit_func_call_expr(name, args, instructions)
             }
+            Expression::Cast {
+                expr,
+                target_type: _,
+            } => self.emit_expression(expr, instructions),
             _ => unimplemented!("Expression type {:?} not implemented in emitter", expr),
         }
     }

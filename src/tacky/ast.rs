@@ -62,6 +62,7 @@ pub enum Instruction {
 #[derive(Debug, Clone, PartialEq)]
 pub enum Value {
     IntegerConstant(i32),
+    LongConstant(i64),
     Variable(String),
 }
 

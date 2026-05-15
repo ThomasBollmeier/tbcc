@@ -9,8 +9,8 @@ mod scope;
 mod identifier_resolver;
 mod loop_labeler;
 pub mod symbol_table;
+//mod type_checker_old;
 mod type_checker;
-mod type_checker_new;
 
 pub use label_resolver::LabelResolver;
 pub use name_generator::{
