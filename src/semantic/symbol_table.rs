@@ -1,7 +1,7 @@
 use std::collections::hash_map::{Entry, Iter};
 use std::collections::HashMap;
 use std::sync::{OnceLock, RwLock};
-use crate::ast::Type;
+use crate::common::Type;
 
 static SYMBOL_TABLE: OnceLock<RwLock<SymbolTable>> = OnceLock::new();
 

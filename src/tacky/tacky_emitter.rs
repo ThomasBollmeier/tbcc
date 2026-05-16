@@ -1,8 +1,12 @@
 use super::ast::Instruction::Unary;
 use super::ast::Value::{IntegerConstant, LongConstant};
 use super::ast::{BinaryOperator, Function, Instruction, Program, TopLevel, UnaryOperator, Value};
-use crate::ast::{BinaryOp, Block, BlockItem, Expression, ForInit, FunctionDeclaration, Label, Statement, StorageClass, TypedExpression, UnaryOp, VarDeclaration};
-use crate::semantic::symbol_table::{IdentAttrs, InitValue, InitialValue};
+use crate::ast::{
+    BinaryOp, Block, BlockItem, Expression, ForInit, FunctionDeclaration, Label, Statement,
+    StorageClass, TypedExpression, UnaryOp, VarDeclaration,
+};
+use crate::common::Type;
+use crate::semantic::symbol_table::{IdentAttrs, InitValue, InitialValue, SymbolTableEntry};
 use crate::semantic::{NameGeneratorRef, symbol_table};
 use anyhow::{Result, anyhow};
 
@@ -31,10 +35,10 @@ impl TackyEmitter {
                 crate::ast::Declaration::FunctionDecl(func_decl) => Some(func_decl),
                 _ => None,
             })
-            .filter(|func_decl| func_decl.body.is_some()) // Skip main function for now
+            .filter(|func_decl| func_decl.body.is_some())
             .map(|func_decl| self.emit_function_decl(func_decl))
             .filter_map(Result::ok)
-            .map(|function| TopLevel::Function(function))
+            .map(TopLevel::Function)
             .collect::<Vec<TopLevel>>();
 
         top_levels.extend(Self::read_var_decls_from_symbol_table());
@@ -52,8 +56,12 @@ impl TackyEmitter {
                         init_value,
                     } => {
                         let initial_value = match init_value {
-                            Some(InitialValue::Initialized(InitValue::Int(ival))) => IntegerConstant(*ival),
-                            Some(InitialValue::Initialized(InitValue::Long(lval))) => LongConstant(*lval),
+                            Some(InitialValue::Initialized(InitValue::Int(ival))) => {
+                                IntegerConstant(*ival)
+                            }
+                            Some(InitialValue::Initialized(InitValue::Long(lval))) => {
+                                LongConstant(*lval)
+                            }
                             Some(InitialValue::Tentative) => IntegerConstant(0),
                             None => return None,
                         };
@@ -62,6 +70,7 @@ impl TackyEmitter {
                                 name: name.clone(),
                                 is_global: *is_global,
                                 initial_value,
+                                c_type: entry.c_type.clone(),
                             },
                         ))
                     }
@@ -384,7 +393,7 @@ impl TackyEmitter {
             match expression {
                 Some(expression) => {
                     let case_value = self.emit_expression(expression, &mut instructions);
-                    let dst = Value::Variable(self.make_temp_var());
+                    let dst = self.make_temp_var(&Type::Int);
                     instructions.push(Instruction::Binary {
                         op: BinaryOperator::Equal,
                         src1: case_value,
@@ -413,43 +422,81 @@ impl TackyEmitter {
         Ok(instructions)
     }
 
-    fn emit_expression(&mut self, expr: &TypedExpression, instructions: &mut Vec<Instruction>) -> Value {
+    fn emit_expression(
+        &mut self,
+        expr: &TypedExpression,
+        instructions: &mut Vec<Instruction>,
+    ) -> Value {
+        let expr_type = expr.get_type();
         match &expr.0 {
             Expression::IntegerConstant(value) => self.emit_integer_constant(*value),
-            Expression::UnaryExpr(op, expr) => self.emit_unary_expr(op, expr, instructions),
+            Expression::LongConstant(value) => self.emit_long_constant(*value),
+            Expression::UnaryExpr(op, expr) => {
+                self.emit_unary_expr(op, expr, &expr_type, instructions)
+            }
             Expression::BinaryExpr(BinaryOp::LogicalAnd, left, right) => {
-                self.emit_logical_and_expr(left, right, instructions)
+                self.emit_logical_and_expr(left, right, &expr_type, instructions)
             }
             Expression::BinaryExpr(BinaryOp::LogicalOr, left, right) => {
-                self.emit_logical_or_expr(left, right, instructions)
+                self.emit_logical_or_expr(left, right, &expr_type, instructions)
             }
             Expression::BinaryExpr(op, left, right) => {
-                self.emit_binary_expr(op, left, right, instructions)
+                self.emit_binary_expr(op, left, right, &expr_type, instructions)
             }
             Expression::Assignment {
                 left,
                 right,
                 is_postfix,
-            } => self.emit_assignment_expr(left, right, *is_postfix, instructions),
+            } => self.emit_assignment_expr(left, right, *is_postfix, &expr_type, instructions),
             Expression::Var(name) => self.emit_var_expr(name),
             Expression::ConditionalExpr {
                 condition,
                 then_expr,
                 else_expr,
-            } => self.emit_conditional_expr(condition, then_expr, else_expr, instructions),
+            } => self.emit_conditional_expr(condition, then_expr, else_expr, &expr_type, instructions),
             Expression::FuncCall { name, args } => {
-                self.emit_func_call_expr(name, args, instructions)
+                self.emit_func_call_expr(name, args, &expr_type, instructions)
             }
-            Expression::Cast {
-                expr,
-                target_type: _,
-            } => self.emit_expression(expr, instructions),
-            _ => unimplemented!("Expression type {:?} not implemented in emitter", expr),
+            Expression::Cast { expr, target_type } => {
+                self.emit_cast_expr(expr, target_type, instructions)
+            }
         }
+    }
+
+    fn emit_cast_expr(
+        &mut self,
+        expr: &TypedExpression,
+        target_type: &Type,
+        instructions: &mut Vec<Instruction>,
+    ) -> Value {
+        let expr_value = self.emit_expression(expr, instructions);
+        if expr.get_type() == *target_type {
+            return expr_value;
+        }
+
+        let result = self.make_temp_var(target_type);
+
+        if *target_type == Type::Long {
+            instructions.push(Instruction::SignExtend {
+                src: expr_value,
+                dst: result.clone(),
+            });
+        } else {
+            instructions.push(Instruction::Truncate {
+                src: expr_value,
+                dst: result.clone(),
+            });
+        }
+
+        result
     }
 
     fn emit_integer_constant(&self, value: i32) -> Value {
         IntegerConstant(value)
+    }
+
+    fn emit_long_constant(&self, value: i64) -> Value {
+        LongConstant(value)
     }
 
     fn emit_var_expr(&self, name: &str) -> Value {
@@ -460,11 +507,12 @@ impl TackyEmitter {
         &mut self,
         op: &UnaryOp,
         expr: &TypedExpression,
+        c_type: &Type,
         instructions: &mut Vec<Instruction>,
     ) -> Value {
         let op = self.unary_op(op);
         let src = self.emit_expression(expr, instructions);
-        let dst = Value::Variable(self.make_temp_var());
+        let dst = self.make_temp_var(c_type);
         instructions.push(Unary {
             op,
             src,
@@ -477,11 +525,12 @@ impl TackyEmitter {
         &mut self,
         left: &TypedExpression,
         right: &TypedExpression,
+        c_type: &Type,
         instructions: &mut Vec<Instruction>,
     ) -> Value {
         let end_label = self.make_label("and_end");
         let false_label = self.make_label("and_false");
-        let result = Value::Variable(self.make_temp_var());
+        let result = self.make_temp_var(c_type);
 
         let val1 = self.emit_expression(left, instructions);
         instructions.push(Instruction::JumpIfZero {
@@ -517,11 +566,12 @@ impl TackyEmitter {
         &mut self,
         left: &TypedExpression,
         right: &TypedExpression,
+        c_type: &Type,
         instructions: &mut Vec<Instruction>,
     ) -> Value {
         let end_label = self.make_label("or_end");
         let true_label = self.make_label("or_true");
-        let result = Value::Variable(self.make_temp_var());
+        let result = self.make_temp_var(c_type);
 
         let val1 = self.emit_expression(left, instructions);
         instructions.push(Instruction::JumpIfNotZero {
@@ -558,11 +608,12 @@ impl TackyEmitter {
         op: &BinaryOp,
         left: &TypedExpression,
         right: &TypedExpression,
+        c_type: &Type,
         instructions: &mut Vec<Instruction>,
     ) -> Value {
         let src1 = self.emit_expression(left, instructions);
         let src2 = self.emit_expression(right, instructions);
-        let dst = Value::Variable(self.make_temp_var());
+        let dst = self.make_temp_var(c_type);
         let op = self.binary_op(op);
         instructions.push(Instruction::Binary {
             op,
@@ -578,6 +629,7 @@ impl TackyEmitter {
         left: &TypedExpression,
         right: &TypedExpression,
         is_postfix: bool,
+        c_type: &Type,
         instructions: &mut Vec<Instruction>,
     ) -> Value {
         let src = self.emit_expression(right, instructions);
@@ -589,7 +641,7 @@ impl TackyEmitter {
             });
             dst
         } else {
-            let original_value = Value::Variable(self.make_temp_var());
+            let original_value = self.make_temp_var(c_type);
             instructions.push(Instruction::Copy {
                 src: dst.clone(),
                 dst: original_value.clone(),
@@ -604,11 +656,12 @@ impl TackyEmitter {
         condition: &TypedExpression,
         then_expr: &TypedExpression,
         else_expr: &TypedExpression,
+        c_type: &Type,
         instructions: &mut Vec<Instruction>,
     ) -> Value {
         let end_label = self.make_label("cond_end");
         let else_label = self.make_label("cond_else");
-        let result = Value::Variable(self.make_temp_var());
+        let result = self.make_temp_var(c_type);
 
         let condition_value = self.emit_expression(condition, instructions);
         instructions.push(Instruction::JumpIfZero {
@@ -640,6 +693,7 @@ impl TackyEmitter {
         &mut self,
         name: &str,
         args: &Vec<TypedExpression>,
+        return_type: &Type,
         instructions: &mut Vec<Instruction>,
     ) -> Value {
         let arguments: Vec<Value> = args
@@ -647,7 +701,7 @@ impl TackyEmitter {
             .map(|arg| self.emit_expression(arg, instructions))
             .collect();
 
-        let dst = Value::Variable(self.make_temp_var());
+        let dst = self.make_temp_var(return_type);
 
         instructions.push(Instruction::FunctionCall {
             name: name.to_string(),
@@ -690,10 +744,24 @@ impl TackyEmitter {
         }
     }
 
-    fn make_temp_var(&mut self) -> String {
+    fn make_temp_var_name(&mut self) -> String {
         self.tmp_var_name_generator
             .borrow_mut()
             .make_unique_name("")
+    }
+
+    fn make_temp_var(&mut self, c_type: &Type) -> Value {
+        let name = self.make_temp_var_name();
+
+        symbol_table::insert(
+            name.clone(),
+            SymbolTableEntry {
+                c_type: c_type.clone(),
+                attrs: IdentAttrs::Local,
+            },
+        );
+
+        Value::Variable(name)
     }
 
     fn make_label(&mut self, prefix: &str) -> String {
@@ -717,8 +785,8 @@ impl TackyEmitter {
 
 #[cfg(test)]
 mod tests {
-    use crate::ast::typed;
     use super::*;
+    use crate::ast::typed;
     use crate::semantic;
     use crate::tacky::ast::UnaryOperator::{Complement, Negate};
 
@@ -1210,7 +1278,9 @@ mod tests {
             then_branch: Box::new(Statement::IfStatement {
                 condition: typed(Expression::Var("b".to_string())),
                 then_branch: Box::new(Statement::Return(typed(Expression::IntegerConstant(1)))),
-                else_branch: Some(Box::new(Statement::Return(typed(Expression::IntegerConstant(2))))),
+                else_branch: Some(Box::new(Statement::Return(typed(
+                    Expression::IntegerConstant(2),
+                )))),
             }),
             else_branch: None,
         };

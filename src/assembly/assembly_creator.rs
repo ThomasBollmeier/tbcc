@@ -125,6 +125,7 @@ impl AssemblyCreator {
                     arguments,
                     dst,
                 } => self.push_function_call(&mut ret, name, arguments, dst),
+                _ => return Err(anyhow::anyhow!("Not a valid instruction.")),
             }
         }
 

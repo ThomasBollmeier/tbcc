@@ -796,10 +796,21 @@ impl VisitorMut for TypeChecker {
                 ..
             } => {
                 *condition = self.set_type(condition)?;
+                let mut condition_type = condition.get_type();
                 body.accept_mut(self)?;
                 for (_, typed_expr) in arms {
                     if let Some(typed_expr) = typed_expr {
-                        *typed_expr = self.set_type(typed_expr)?;
+                        let case_expr = self.set_type(typed_expr)?;
+                        let common_type = Self::get_common_type(&case_expr.get_type(), &condition_type);
+                        if common_type == Type::Undefined {
+                            return Err(anyhow!(
+                                "Case expression type is incompatible with switch condition type"
+                            ));                        }
+                        *typed_expr = Self::convert_to(&case_expr, &common_type);
+                        if condition_type != common_type {
+                            condition_type = common_type.clone();
+                            *condition = Self::convert_to(&condition, &common_type);
+                        }
                     }
                 }
             }

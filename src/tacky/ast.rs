@@ -1,3 +1,5 @@
+use crate::common::Type;
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct Program (pub Vec<TopLevel>);
 
@@ -20,11 +22,20 @@ pub struct StaticVariable {
     pub name: String,
     pub is_global: bool,
     pub initial_value: Value,
+    pub c_type: Type,
 }
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Instruction {
     Return(Value),
+    SignExtend {
+        src: Value,
+        dst: Value,
+    },
+    Truncate {
+        src: Value,
+        dst: Value,
+    },
     Unary {
         op: UnaryOperator,
         src: Value,
