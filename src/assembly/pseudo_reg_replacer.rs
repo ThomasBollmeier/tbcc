@@ -1,6 +1,6 @@
 use crate::assembly::ast::{FuncDef, Instruction, Operand, VisitorMut};
-use crate::semantic::symbol_table;
-use crate::semantic::symbol_table::IdentAttrs;
+use crate::common::symbol_table;
+use crate::common::symbol_table::IdentAttrs;
 use std::collections::HashMap;
 
 pub struct PseudoRegReplacer {
@@ -65,7 +65,15 @@ impl VisitorMut for PseudoRegReplacer {
     fn visit_instruction(&mut self, instruction: &mut Instruction) {
         use crate::assembly::ast::Instruction::*;
         match instruction {
-            Mov { src, dst } => {
+            Mov { src, dst, .. } => {
+                if let Some(new_src) = self.replace_operand(src) {
+                    *src = new_src;
+                }
+                if let Some(new_dst) = self.replace_operand(dst) {
+                    *dst = new_dst;
+                }
+            }
+            MovSx { src, dst, .. } => {
                 if let Some(new_src) = self.replace_operand(src) {
                     *src = new_src;
                 }
@@ -86,13 +94,12 @@ impl VisitorMut for PseudoRegReplacer {
                     *right = new_right;
                 }
             }
-            Idiv(operand) => {
+            Idiv { operand, .. } => {
                 if let Some(new_operand) = self.replace_operand(operand) {
                     *operand = new_operand;
                 }
             }
-            Cdq | AllocateStack(_) | Ret => {}
-            Cmp { op1, op2 } => {
+            Cmp { op1, op2, .. } => {
                 if let Some(new_op1) = self.replace_operand(op1) {
                     *op1 = new_op1;
                 }
@@ -100,20 +107,17 @@ impl VisitorMut for PseudoRegReplacer {
                     *op2 = new_op2;
                 }
             }
-            Jmp(_) | JmpCC(_, _) => {}
             SetCC(_, operand) => {
                 if let Some(new_operand) = self.replace_operand(operand) {
                     *operand = new_operand;
                 }
             }
-            Label(_) => {}
             Push(operand) => {
                 if let Some(new_operand) = self.replace_operand(operand) {
                     *operand = new_operand;
                 }
             }
-            Call(_) => {}
-            DeAllocateStack(_) => {}
+            _ => {}
         }
     }
 }
@@ -122,7 +126,7 @@ impl VisitorMut for PseudoRegReplacer {
 mod tests {
     use super::PseudoRegReplacer;
     use crate::assembly::ast::TopLevel::Function;
-    use crate::assembly::ast::{FuncDef, Instruction, Operand, Program, Register, UnaryOp};
+    use crate::assembly::ast::{AssemblyType, FuncDef, Instruction, Operand, Program, Register, UnaryOp};
 
     fn apply_replacer(instructions: Vec<Instruction>) -> Vec<Instruction> {
         let func_def = FuncDef::new("main".to_string(), true, instructions);
@@ -144,10 +148,12 @@ mod tests {
     fn replaces_distinct_pseudo_registers_with_unique_stack_offsets() {
         let instructions = vec![
             Instruction::Mov {
+                assembly_type: AssemblyType::Longword,
                 src: Operand::PseudoReg("a".to_string()),
                 dst: Operand::PseudoReg("b".to_string()),
             },
             Instruction::Unary {
+                assembly_type: AssemblyType::Longword,
                 op: UnaryOp::Neg,
                 operand: Operand::PseudoReg("c".to_string()),
             },
@@ -156,7 +162,7 @@ mod tests {
         let instructions = apply_replacer(instructions);
 
         match &instructions[0] {
-            Instruction::Mov { src, dst } => {
+            Instruction::Mov { src, dst, .. } => {
                 assert!(matches!(src, Operand::Stack(-4)));
                 assert!(matches!(dst, Operand::Stack(-8)));
             }
@@ -175,10 +181,12 @@ mod tests {
     fn reuses_stack_offset_for_same_pseudo_register() {
         let instructions = vec![
             Instruction::Mov {
+                assembly_type: AssemblyType::Longword,
                 src: Operand::PseudoReg("tmp".to_string()),
                 dst: Operand::PseudoReg("tmp".to_string()),
             },
             Instruction::Unary {
+                assembly_type: AssemblyType::Longword,
                 op: UnaryOp::Not,
                 operand: Operand::PseudoReg("tmp".to_string()),
             },
@@ -187,7 +195,7 @@ mod tests {
         let instructions = apply_replacer(instructions);
 
         match &instructions[0] {
-            Instruction::Mov { src, dst } => {
+            Instruction::Mov { src, dst, .. } => {
                 assert!(matches!(src, Operand::Stack(-4)));
                 assert!(matches!(dst, Operand::Stack(-4)));
             }
@@ -206,6 +214,7 @@ mod tests {
     fn leaves_non_pseudo_operands_unchanged() {
         let instructions = vec![
             Instruction::Mov {
+                assembly_type: AssemblyType::Longword,
                 src: Operand::Immediate(7),
                 dst: Operand::Register(Register::AX),
             },
@@ -215,7 +224,7 @@ mod tests {
         let instructions = apply_replacer(instructions);
 
         match &instructions[0] {
-            Instruction::Mov { src, dst } => {
+            Instruction::Mov { src, dst, .. } => {
                 assert!(matches!(src, Operand::Immediate(7)));
                 assert!(matches!(dst, Operand::Register(Register::AX)));
             }

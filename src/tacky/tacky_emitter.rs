@@ -5,10 +5,10 @@ use crate::ast::{
     BinaryOp, Block, BlockItem, Expression, ForInit, FunctionDeclaration, Label, Statement,
     StorageClass, TypedExpression, UnaryOp, VarDeclaration,
 };
-use crate::common::Type;
-use crate::semantic::symbol_table::{IdentAttrs, InitValue, InitialValue, SymbolTableEntry};
-use crate::semantic::{NameGeneratorRef, symbol_table};
-use anyhow::{Result, anyhow};
+use crate::common::{symbol_table, Type};
+use crate::common::symbol_table::{IdentAttrs, InitValue, InitialValue, SymbolTableEntry};
+use crate::semantic::NameGeneratorRef;
+use anyhow::{anyhow, Result};
 
 #[derive(Clone)]
 pub struct TackyEmitter {

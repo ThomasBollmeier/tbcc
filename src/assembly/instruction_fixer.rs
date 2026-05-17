@@ -31,13 +31,15 @@ impl VisitorMut for InstructionFixer {
 
         for instruction in &func_def.instructions {
             match instruction {
-                Mov { src, dst } => {
+                Mov { assembly_type, src, dst, .. } => {
                     if Self::all_memory(&[src, dst]) {
                         new_instructions.push(Mov {
+                            assembly_type: assembly_type.clone(),
                             src: src.clone(),
                             dst: Register(R10),
                         });
                         new_instructions.push(Mov {
+                            assembly_type: assembly_type.clone(),
                             src: Register(R10),
                             dst: dst.clone(),
                         });
@@ -45,19 +47,22 @@ impl VisitorMut for InstructionFixer {
                         new_instructions.push(instruction.clone())
                     }
                 }
-                Binary { op, left, right } => match op {
+                Binary { assembly_type, op, left, right } => match op {
                     Mul => {
                         if Self::is_memory(right) {
                             new_instructions.push(Mov {
+                                assembly_type: assembly_type.clone(),
                                 src: right.clone(),
                                 dst: Register(R11),
                             });
                             new_instructions.push(Binary {
+                                assembly_type: assembly_type.clone(),
                                 op: Mul,
                                 left: left.clone(),
                                 right: Register(R11),
                             });
                             new_instructions.push(Mov {
+                                assembly_type: assembly_type.clone(),
                                 src: Register(R11),
                                 dst: right.clone(),
                             });
@@ -68,10 +73,12 @@ impl VisitorMut for InstructionFixer {
                     ShiftLeft | ShiftRight => {
                         if Self::is_memory(left) {
                             new_instructions.push(Mov {
+                                assembly_type: assembly_type.clone(),
                                 src: left.clone(),
                                 dst: Register(CX),
                             });
                             new_instructions.push(Binary {
+                                assembly_type: assembly_type.clone(),
                                 op: op.clone(),
                                 left: Register(CX),
                                 right: right.clone(),
@@ -83,10 +90,12 @@ impl VisitorMut for InstructionFixer {
                     Add | Sub | BitAnd | BitOr | BitXor => {
                         if Self::all_memory(&[left, right]) {
                             new_instructions.push(Mov {
+                                assembly_type: assembly_type.clone(),
                                 src: left.clone(),
                                 dst: Register(R10),
                             });
                             new_instructions.push(Binary {
+                                assembly_type: assembly_type.clone(),
                                 op: op.clone(),
                                 left: Register(R10),
                                 right: right.clone(),
@@ -96,23 +105,29 @@ impl VisitorMut for InstructionFixer {
                         }
                     }
                 },
-                Idiv(op) => match op {
+                Idiv { assembly_type, operand: op} => match op {
                     Immediate(_) => {
                         new_instructions.push(Mov {
+                            assembly_type: assembly_type.clone(),
                             src: op.clone(),
                             dst: Register(R10),
                         });
-                        new_instructions.push(Idiv(Register(R10)));
+                        new_instructions.push(Idiv {
+                            assembly_type: assembly_type.clone(),
+                            operand: Register(R10)
+                        });
                     }
                     _ => new_instructions.push(instruction.clone()),
                 },
-                Cmp { op1, op2 } => match (op1, op2) {
+                Cmp { assembly_type, op1, op2 } => match (op1, op2) {
                     (_, Immediate(_)) => {
                         new_instructions.push(Mov {
+                            assembly_type: assembly_type.clone(),
                             src: op2.clone(),
                             dst: Register(R11),
                         });
                         new_instructions.push(Cmp {
+                            assembly_type: assembly_type.clone(),
                             op1: op1.clone(),
                             op2: Register(R11),
                         });
@@ -120,10 +135,12 @@ impl VisitorMut for InstructionFixer {
                     _ => {
                         if Self::all_memory(&[op1, op2]) {
                             new_instructions.push(Mov {
+                                assembly_type: assembly_type.clone(),
                                 src: op1.clone(),
                                 dst: Register(R10),
                             });
                             new_instructions.push(Cmp {
+                                assembly_type: assembly_type.clone(),
                                 op1: Register(R10),
                                 op2: op2.clone(),
                             });
@@ -144,7 +161,7 @@ impl VisitorMut for InstructionFixer {
 mod tests {
     use super::InstructionFixer;
     use crate::assembly::ast::TopLevel::Function;
-    use crate::assembly::ast::{FuncDef, Instruction, Operand, Program, Register, UnaryOp};
+    use crate::assembly::ast::{AssemblyType, FuncDef, Instruction, Operand, Program, Register, UnaryOp};
     use crate::assembly::pseudo_reg_replacer::PseudoRegReplacer;
 
     fn apply_fixer(instructions: Vec<Instruction>) -> Vec<Instruction> {
@@ -176,6 +193,7 @@ mod tests {
     #[test]
     fn rewrites_stack_to_stack_mov_into_two_movs_via_r10() {
         let instructions = vec![Instruction::Mov {
+            assembly_type: AssemblyType::Longword,
             src: Operand::Stack(-4),
             dst: Operand::Stack(-8),
         }];
@@ -185,7 +203,7 @@ mod tests {
         assert!(matches!(fixed[0], Instruction::AllocateStack(0)));
 
         match &fixed[1] {
-            Instruction::Mov { src, dst } => {
+            Instruction::Mov { src, dst, .. } => {
                 assert!(matches!(src, Operand::Stack(-4)));
                 assert!(matches!(dst, Operand::Register(Register::R10)));
             }
@@ -193,7 +211,7 @@ mod tests {
         }
 
         match &fixed[2] {
-            Instruction::Mov { src, dst } => {
+            Instruction::Mov { src, dst, .. } => {
                 assert!(matches!(src, Operand::Register(Register::R10)));
                 assert!(matches!(dst, Operand::Stack(-8)));
             }
@@ -205,10 +223,12 @@ mod tests {
     fn keeps_non_stack_to_stack_instructions_in_order() {
         let instructions = vec![
             Instruction::Mov {
+                assembly_type: AssemblyType::Longword,
                 src: Operand::Immediate(1),
                 dst: Operand::Register(Register::AX),
             },
             Instruction::Unary {
+                assembly_type: AssemblyType::Longword,
                 op: UnaryOp::Neg,
                 operand: Operand::Register(Register::AX),
             },
@@ -221,7 +241,7 @@ mod tests {
         assert!(matches!(fixed[0], Instruction::AllocateStack(0)));
 
         match &fixed[1] {
-            Instruction::Mov { src, dst } => {
+            Instruction::Mov { src, dst, .. } => {
                 assert!(matches!(src, Operand::Immediate(1)));
                 assert!(matches!(dst, Operand::Register(Register::AX)));
             }
@@ -229,7 +249,7 @@ mod tests {
         }
 
         match &fixed[2] {
-            Instruction::Unary { op, operand } => {
+            Instruction::Unary { op, operand, .. } => {
                 assert_eq!(*op, UnaryOp::Neg);
                 assert!(matches!(operand, Operand::Register(Register::AX)));
             }

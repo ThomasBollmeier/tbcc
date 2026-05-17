@@ -1,9 +1,10 @@
 use crate::assembly::ast::Operand::Stack;
 use crate::assembly::ast::Register::{CX, DI, DX, R8, R9, SI};
-use crate::assembly::ast::{StaticVar, TopLevel as TopLevelAsm};
+use crate::assembly::ast::{AssemblyType, StaticVar, TopLevel as TopLevelAsm};
 use crate::assembly::ast::{
     ConditionCode, FuncDef, Instruction, Operand, Program, Register, UnaryOp,
 };
+use crate::common::{InitValue, Type, symbol_table};
 use crate::tacky::ast::{
     BinaryOperator as TackyBinOp, BinaryOperator, Function, Instruction as TackyInstruction,
     StaticVariable, TopLevel, UnaryOperator, Value,
@@ -43,15 +44,17 @@ impl AssemblyCreator {
     }
 
     fn create_static_var(&mut self, static_var: &StaticVariable) -> anyhow::Result<StaticVar> {
-        let value = match static_var.initial_value {
-            Value::IntegerConstant(i) => i,
-            _ => return Err(anyhow::anyhow!("Not an integer constant.")),
+        let (value, alignment) = match static_var.initial_value {
+            Value::IntegerConstant(i) => (InitValue::Int(i), 4),
+            Value::LongConstant(l) => (InitValue::Long(l), 8),
+            _ => return Err(anyhow::anyhow!("Not a valid constant.")),
         };
 
         Ok(StaticVar {
             name: static_var.name.clone(),
             is_global: static_var.is_global,
             value,
+            alignment,
         })
     }
 
@@ -69,8 +72,13 @@ impl AssemblyCreator {
                 Stack(offset as i32)
             };
 
+            let assembly_type = Self::lookup_asm_type(param);
             let dst = Operand::PseudoReg(param.clone());
-            instructions.push(Instruction::Mov { src, dst });
+            instructions.push(Instruction::Mov {
+                assembly_type,
+                src,
+                dst,
+            });
         }
 
         instructions.extend(self.create_instructions(&func_def.body)?);
@@ -169,13 +177,19 @@ impl AssemblyCreator {
         // System V calling convention:
         // First 6 arguments into registers
         for (reg_index, arg) in register_args.iter().enumerate() {
+            let assembly_type = Self::get_asm_type(arg);
             let src = self.create_operand(arg);
             let dst = Operand::Register(self.arg_registers[reg_index].clone());
-            instructions.push(Instruction::Mov { src, dst });
+            instructions.push(Instruction::Mov {
+                assembly_type,
+                src,
+                dst,
+            });
         }
 
         // Remaining arguments pushed onto stack
         for arg in stack_args.iter().rev() {
+            let assembly_type = Self::get_asm_type(arg);
             let op = self.create_operand(arg);
             match op {
                 Operand::Register(_) | Operand::Immediate(_) => {
@@ -183,6 +197,7 @@ impl AssemblyCreator {
                 }
                 _ => {
                     instructions.push(Instruction::Mov {
+                        assembly_type,
                         src: op,
                         dst: Operand::Register(AX),
                     });
@@ -200,7 +215,9 @@ impl AssemblyCreator {
         }
 
         // Set return value:
+        let assembly_type = Self::get_asm_type(dst);
         instructions.push(Instruction::Mov {
+            assembly_type,
             src: Operand::Register(AX),
             dst: self.create_operand(dst),
         });
@@ -209,8 +226,10 @@ impl AssemblyCreator {
     fn push_return(&mut self, instructions: &mut Vec<Instruction>, value: &Value) {
         use crate::assembly::ast::Instruction::*;
 
+        let assembly_type = Self::get_asm_type(value);
         let src = self.create_operand(value);
         instructions.push(Mov {
+            assembly_type,
             src,
             dst: Operand::Register(Register::AX),
         });
@@ -223,10 +242,12 @@ impl AssemblyCreator {
         let src_op = self.create_operand(src);
         let dst_op = self.create_operand(dst);
         instructions.push(Cmp {
+            assembly_type: Self::get_asm_type(src),
             op1: Operand::Immediate(0),
             op2: src_op,
         });
         instructions.push(Mov {
+            assembly_type: Self::get_asm_type(dst),
             src: Operand::Immediate(0),
             dst: dst_op.clone(),
         });
@@ -242,15 +263,18 @@ impl AssemblyCreator {
     ) {
         use crate::assembly::ast::Instruction::*;
 
+        let assembly_type = Self::get_asm_type(src);
         let src_op = self.create_operand(src);
         let dst_op = self.create_operand(dst);
         let unary_op = self.map_unary_operator(op);
 
         instructions.push(Mov {
+            assembly_type: assembly_type.clone(),
             src: src_op,
             dst: dst_op.clone(),
         });
         instructions.push(Unary {
+            assembly_type,
             op: unary_op,
             operand: dst_op,
         });
@@ -265,17 +289,23 @@ impl AssemblyCreator {
     ) {
         use crate::assembly::ast::Instruction::*;
 
+        let assembly_type = Self::get_asm_type(src1);
         let src1_op = self.create_operand(src1);
         let src2_op = self.create_operand(src2);
         let dst_op = self.create_operand(dst);
 
         instructions.push(Mov {
+            assembly_type: assembly_type.clone(),
             src: src1_op,
             dst: Operand::Register(Register::AX),
         });
-        instructions.push(Cdq);
-        instructions.push(Idiv(src2_op));
+        instructions.push(Cdq(assembly_type.clone()));
+        instructions.push(Idiv {
+            assembly_type: assembly_type.clone(),
+            operand: src2_op,
+        });
         instructions.push(Mov {
+            assembly_type,
             src: Operand::Register(Register::AX),
             dst: dst_op,
         });
@@ -290,17 +320,23 @@ impl AssemblyCreator {
     ) {
         use crate::assembly::ast::Instruction::*;
 
+        let assembly_type = Self::get_asm_type(src1);
         let src1_op = self.create_operand(src1);
         let src2_op = self.create_operand(src2);
         let dst_op = self.create_operand(dst);
 
         instructions.push(Mov {
+            assembly_type: assembly_type.clone(),
             src: src1_op,
             dst: Operand::Register(Register::AX),
         });
-        instructions.push(Cdq);
-        instructions.push(Idiv(src2_op));
+        instructions.push(Cdq(assembly_type.clone()));
+        instructions.push(Idiv {
+            assembly_type: assembly_type.clone(),
+            operand: src2_op,
+        });
         instructions.push(Mov {
+            assembly_type,
             src: Operand::Register(DX),
             dst: dst_op,
         });
@@ -342,11 +378,13 @@ impl AssemblyCreator {
         let dst_op = self.create_operand(dst);
 
         instructions.push(Cmp {
+            assembly_type: Self::get_asm_type(src1),
             op1: src2_op,
             op2: src1_op,
         });
         let condition_code = self.map_relational_operator(op);
         instructions.push(Mov {
+            assembly_type: Self::get_asm_type(dst),
             src: Operand::Immediate(0),
             dst: dst_op.clone(),
         });
@@ -363,16 +401,19 @@ impl AssemblyCreator {
     ) {
         use crate::assembly::ast::Instruction::*;
 
+        let assembly_type = Self::get_asm_type(src1);
         let src1_op = self.create_operand(src1);
         let src2_op = self.create_operand(src2);
         let dst_op = self.create_operand(dst);
 
         let binary_op = self.map_binary_operator(op);
         instructions.push(Mov {
+            assembly_type: assembly_type.clone(),
             src: src1_op,
             dst: dst_op.clone(),
         });
         instructions.push(Binary {
+            assembly_type,
             op: binary_op,
             left: src2_op,
             right: dst_op,
@@ -393,6 +434,7 @@ impl AssemblyCreator {
 
         let condition_op = self.create_operand(condition);
         instructions.push(Cmp {
+            assembly_type: Self::get_asm_type(condition),
             op1: Operand::Immediate(0),
             op2: condition_op,
         });
@@ -409,6 +451,7 @@ impl AssemblyCreator {
 
         let condition_op = self.create_operand(condition);
         instructions.push(Cmp {
+            assembly_type: Self::get_asm_type(condition),
             op1: Operand::Immediate(0),
             op2: condition_op,
         });
@@ -421,6 +464,7 @@ impl AssemblyCreator {
         let src_op = self.create_operand(src);
         let dst_op = self.create_operand(dst);
         instructions.push(Mov {
+            assembly_type: Self::get_asm_type(src),
             src: src_op,
             dst: dst_op,
         });
@@ -476,6 +520,30 @@ impl AssemblyCreator {
             _ => unimplemented!("unsupported relational operator {:?}", relational_op),
         }
     }
+
+    fn map_type_to_asm_type(c_type: Type) -> AssemblyType {
+        use crate::common::Type::*;
+        match c_type {
+            Int => AssemblyType::Longword,
+            Long => AssemblyType::Quadword,
+            _ => unimplemented!("unsupported type {:?}", c_type),
+        }
+    }
+
+    fn lookup_asm_type(name: &str) -> AssemblyType {
+        match symbol_table::get(name) {
+            Some(entry) => Self::map_type_to_asm_type(entry.c_type),
+            None => panic!("Symbol not found: {}", name),
+        }
+    }
+
+    fn get_asm_type(value: &Value) -> AssemblyType {
+        match value {
+            Value::IntegerConstant(_) => AssemblyType::Longword,
+            Value::LongConstant(_) => AssemblyType::Quadword,
+            Value::Variable(name) => Self::lookup_asm_type(name),
+        }
+    }
 }
 
 #[cfg(test)]
@@ -488,16 +556,28 @@ mod tests {
     use crate::lexer::Lexer;
     use crate::parser::Parser;
     use crate::semantic;
+    use crate::semantic::NameGeneratorRef;
     use crate::tacky::TackyEmitter;
     use crate::tacky::ast::{
         BinaryOperator, Function as TackyFunctionDef, Instruction as TackyInstruction,
         Program as TackyProgram, Value,
     };
+    use anyhow::Result;
+    use crate::common::symbol_table::IdentAttrs;
 
-    fn make_emitter() -> TackyEmitter {
-        let label_name_gen = semantic::make_label_name_generator();
-        let tmp_var_name_gen = semantic::make_temp_var_name_generator();
-        TackyEmitter::new(label_name_gen, tmp_var_name_gen)
+    fn make_emitter(
+        label_name_gen: &NameGeneratorRef,
+        tmp_var_name_gen: &NameGeneratorRef,
+    ) -> TackyEmitter {
+        TackyEmitter::new(label_name_gen.clone(), tmp_var_name_gen.clone())
+    }
+
+    fn validate(
+        var_name_gen: &NameGeneratorRef,
+        label_name_gen: &NameGeneratorRef,
+        program: &mut crate::ast::Program,
+    ) -> Result<()> {
+        semantic::validate(var_name_gen, label_name_gen, program)
     }
 
     #[test]
@@ -508,9 +588,18 @@ mod tests {
         let tokens = lexer.scan_tokens(code).expect("Failed to scan tokens");
 
         let parser = Parser::new();
-        let program = parser.parse(tokens).expect("Failed to parse program");
+        let mut program = parser.parse(tokens).expect("Failed to parse program");
 
-        let mut tacky_emitter = make_emitter();
+        let var_name_gen = semantic::make_var_name_generator();
+        let label_name_gen = semantic::make_label_name_generator();
+        let tmp_var_name_gen = semantic::make_temp_var_name_generator();
+
+        symbol_table::clear();
+
+        validate(&var_name_gen, &label_name_gen, &mut program)
+            .expect("Failed to validate program");
+
+        let mut tacky_emitter = make_emitter(&label_name_gen, &tmp_var_name_gen);
         let tacky_program = tacky_emitter
             .emit_program(&program)
             .expect("Failed to emit");
@@ -525,6 +614,16 @@ mod tests {
 
     #[test]
     fn creates_asm_program_with_binary_ops() {
+
+        symbol_table::clear();
+        for i in 0..=4 {
+            let var_name = format!("tmp.{}", i);
+            symbol_table::insert(&var_name, symbol_table::SymbolTableEntry {
+                c_type: Type::Int,
+                attrs: IdentAttrs::Local,
+            });
+        }
+
         let tacky_program = TackyProgram(vec![TopLevel::Function(TackyFunctionDef {
             name: "main".to_string(),
             is_global: true,
@@ -581,6 +680,7 @@ mod tests {
         assert!(matches!(
             &instructions[0],
             AsmInstruction::Mov {
+                assembly_type: AssemblyType::Longword,
                 src: AsmOperand::Immediate(1),
                 dst: AsmOperand::PseudoReg(name)
             } if name == "tmp.0"
@@ -588,6 +688,7 @@ mod tests {
         assert!(matches!(
             &instructions[1],
             AsmInstruction::Binary {
+                assembly_type: AssemblyType::Longword,
                 op: AsmBinaryOp::Add,
                 left: AsmOperand::Immediate(2),
                 right: AsmOperand::PseudoReg(name)
@@ -597,6 +698,7 @@ mod tests {
         assert!(matches!(
             &instructions[2],
             AsmInstruction::Mov {
+                assembly_type: AssemblyType::Longword,
                 src: AsmOperand::PseudoReg(src),
                 dst: AsmOperand::PseudoReg(dst)
             } if src == "tmp.0" && dst == "tmp.1"
@@ -604,6 +706,7 @@ mod tests {
         assert!(matches!(
             &instructions[3],
             AsmInstruction::Binary {
+                assembly_type: AssemblyType::Longword,
                 op: AsmBinaryOp::Sub,
                 left: AsmOperand::Immediate(3),
                 right: AsmOperand::PseudoReg(name)
@@ -613,6 +716,7 @@ mod tests {
         assert!(matches!(
             &instructions[4],
             AsmInstruction::Mov {
+                assembly_type: AssemblyType::Longword,
                 src: AsmOperand::PseudoReg(src),
                 dst: AsmOperand::PseudoReg(dst)
             } if src == "tmp.1" && dst == "tmp.2"
@@ -620,6 +724,7 @@ mod tests {
         assert!(matches!(
             &instructions[5],
             AsmInstruction::Binary {
+                assembly_type: AssemblyType::Longword,
                 op: AsmBinaryOp::Mul,
                 left: AsmOperand::Immediate(4),
                 right: AsmOperand::PseudoReg(name)
@@ -629,18 +734,26 @@ mod tests {
         assert!(matches!(
             &instructions[6],
             AsmInstruction::Mov {
+                assembly_type: AssemblyType::Longword,
                 src: AsmOperand::PseudoReg(name),
                 dst: AsmOperand::Register(AsmRegister::AX)
             } if name == "tmp.2"
         ));
-        assert!(matches!(&instructions[7], AsmInstruction::Cdq));
+        assert!(matches!(
+            &instructions[7],
+            AsmInstruction::Cdq(AssemblyType::Longword)
+        ));
         assert!(matches!(
             &instructions[8],
-            AsmInstruction::Idiv(AsmOperand::Immediate(5))
+            AsmInstruction::Idiv {
+                assembly_type: AssemblyType::Longword,
+                operand: AsmOperand::Immediate(5),
+            },
         ));
         assert!(matches!(
             &instructions[9],
             AsmInstruction::Mov {
+                assembly_type: AssemblyType::Longword,
                 src: AsmOperand::Register(AsmRegister::AX),
                 dst: AsmOperand::PseudoReg(name)
             } if name == "tmp.3"
@@ -649,18 +762,26 @@ mod tests {
         assert!(matches!(
             &instructions[10],
             AsmInstruction::Mov {
+                assembly_type: AssemblyType::Longword,
                 src: AsmOperand::PseudoReg(name),
                 dst: AsmOperand::Register(AsmRegister::AX)
             } if name == "tmp.3"
         ));
-        assert!(matches!(&instructions[11], AsmInstruction::Cdq));
+        assert!(matches!(
+            &instructions[11],
+            AsmInstruction::Cdq(AssemblyType::Longword)
+        ));
         assert!(matches!(
             &instructions[12],
-            AsmInstruction::Idiv(AsmOperand::Immediate(2))
+            AsmInstruction::Idiv {
+                assembly_type: AssemblyType::Longword,
+                operand: AsmOperand::Immediate(2),
+            },
         ));
         assert!(matches!(
             &instructions[13],
             AsmInstruction::Mov {
+                assembly_type: AssemblyType::Longword,
                 src: AsmOperand::Register(DX),
                 dst: AsmOperand::PseudoReg(name)
             } if name == "tmp.4"
@@ -669,6 +790,7 @@ mod tests {
         assert!(matches!(
             &instructions[14],
             AsmInstruction::Mov {
+                assembly_type: AssemblyType::Longword,
                 src: AsmOperand::PseudoReg(name),
                 dst: AsmOperand::Register(AsmRegister::AX)
             } if name == "tmp.4"

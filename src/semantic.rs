@@ -8,16 +8,16 @@ mod name_generator;
 mod scope;
 mod identifier_resolver;
 mod loop_labeler;
-pub mod symbol_table;
 //mod type_checker_old;
 mod type_checker;
 
 pub use label_resolver::LabelResolver;
 pub use name_generator::{
-    NameGeneratorRef, make_label_name_generator, make_temp_var_name_generator,
-    make_var_name_generator,
+    make_label_name_generator, make_temp_var_name_generator, make_var_name_generator,
+    NameGeneratorRef,
 };
 pub use identifier_resolver::IdentifierResolver;
+use crate::common::symbol_table;
 use crate::semantic::loop_labeler::LoopLabeler;
 
 pub fn validate(

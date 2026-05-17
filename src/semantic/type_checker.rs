@@ -3,10 +3,10 @@ use crate::ast::{
     BinaryOp, Expression, ForInit, FunctionDeclaration, Program, Statement, StorageClass, Type,
     TypedExpression, UnaryOp, VarDeclaration,
 };
-use crate::semantic::symbol_table;
-use crate::semantic::symbol_table::{IdentAttrs, InitValue, InitialValue, SymbolTableEntry};
+use crate::common::symbol_table;
+use crate::common::symbol_table::{IdentAttrs, InitValue, InitialValue, SymbolTableEntry};
 use crate::semantic::visitor::VisitorMut;
-use anyhow::{Result, anyhow};
+use anyhow::{anyhow, Result};
 
 pub struct TypeChecker {
     current_function: Option<FunctionDeclaration>,
@@ -833,8 +833,9 @@ mod tests {
     use crate::lexer::Lexer;
     use crate::parser::Parser;
     use crate::semantic::type_checker::TypeChecker;
-    use crate::semantic::{IdentifierResolver, make_var_name_generator, symbol_table};
+    use crate::semantic::{make_var_name_generator, IdentifierResolver};
     use anyhow::Result;
+    use crate::common::symbol_table;
 
     #[test]
     fn check_ok() {

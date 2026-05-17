@@ -1,5 +1,5 @@
 use crate::assembly::ast::{BinaryOp, ConditionCode, FuncDef, Instruction, Operand, Program, Register, StaticVar, UnaryOp, Visitor};
-use crate::semantic::symbol_table;
+use crate::common::{symbol_table, InitValue};
 
 pub struct CodeGenerator {
     code: String,
@@ -196,7 +196,12 @@ impl Visitor for CodeGenerator {
             self.write_instruction(&format!(".globl {}", static_var.name));
         }
 
-        if static_var.value != 0 {
+        let value = match static_var.value {
+            InitValue::Int(i) => i as i64,
+            InitValue::Long(l) => l,
+        };
+
+        if value != 0 {
             self.write_instruction(".data");
         } else {
             self.write_instruction(".bss");
@@ -212,8 +217,8 @@ impl Visitor for CodeGenerator {
 
         self.write_label(&self.get_variable_name(&static_var.name));
 
-        if static_var.value != 0 {
-            self.write_instruction(&format!(".long {}", static_var.value));
+        if value != 0 {
+            self.write_instruction(&format!(".long {}", value));
         } else {
             self.write_instruction(".zero 4");
         }
@@ -221,36 +226,37 @@ impl Visitor for CodeGenerator {
 
     fn visit_instruction(&mut self, instruction: &Instruction) {
         match instruction {
-            Instruction::Mov { src, dst } => {
+            Instruction::Mov { src, dst, .. } => {
                 let src = self.operand_4byte_to_string(src);
                 let dst = self.operand_4byte_to_string(dst);
                 self.write_instruction(&format!("movl \t{src}, {dst}"));
             }
+            Instruction::MovSx { .. } => todo!("implement"),
             Instruction::Ret => {
                 self.write_instruction("movq \t%rbp, %rsp");
                 self.write_instruction("popq \t%rbp");
                 self.write_instruction("ret");
             }
-            Instruction::Unary { op, operand } => {
+            Instruction::Unary { op, operand, .. } => {
                 let op_str = self.unary_op_to_string(op);
                 let operand_str = self.operand_4byte_to_string(operand);
                 self.write_instruction(&format!("{op_str} \t{operand_str}"));
             }
-            Instruction::Binary { op, left, right } => {
+            Instruction::Binary { op, left, right, .. } => {
                 let op_str = self.binary_op_to_string(op);
                 let left_str = self.operand_4byte_to_string(left);
                 let right_str = self.operand_4byte_to_string(right);
                 self.write_instruction(&format!("{op_str} \t{left_str}, {right_str}"));
             }
-            Instruction::Idiv(operand) => {
+            Instruction::Idiv { operand, .. } => {
                 let operand_str = self.operand_4byte_to_string(operand);
                 self.write_instruction(&format!("idivl \t{operand_str}"));
             }
-            Instruction::Cdq => self.write_instruction("cdq"),
+            Instruction::Cdq(_) => self.write_instruction("cdq"),
             Instruction::AllocateStack(size) => {
                 self.write_instruction(&format!("subq \t${size}, %rsp"));
             }
-            Instruction::Cmp { op1, op2 } => {
+            Instruction::Cmp { op1, op2, .. } => {
                 let op1_str = self.operand_4byte_to_string(op1);
                 let op2_str = self.operand_4byte_to_string(op2);
                 self.write_instruction(&format!("cmpl \t{op1_str}, {op2_str}"));

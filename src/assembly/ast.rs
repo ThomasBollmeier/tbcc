@@ -1,3 +1,5 @@
+use crate::common::InitValue;
+
 #[derive(Debug)]
 pub struct Program {
     pub top_levels: Vec<TopLevel>,
@@ -96,30 +98,48 @@ impl FuncDef {
 pub struct StaticVar {
     pub name: String,
     pub is_global: bool,
-    pub value: i32,
+    pub value: InitValue,
+    pub alignment: i32,
+}
+
+#[derive(Debug, Clone)]
+pub enum AssemblyType {
+    Longword,
+    Quadword,
 }
 
 #[derive(Debug, Clone)]
 pub enum Instruction {
     Mov {
+        assembly_type: AssemblyType,
+        src: Operand,
+        dst: Operand,
+    },
+    MovSx {
         src: Operand,
         dst: Operand,
     },
     Unary {
         op: UnaryOp,
+        assembly_type: AssemblyType,
         operand: Operand,
     },
     Binary {
         op: BinaryOp,
+        assembly_type: AssemblyType,
         left: Operand,
         right: Operand,
     },
     Cmp {
+        assembly_type: AssemblyType,
         op1: Operand,
         op2: Operand,
     },
-    Idiv(Operand),
-    Cdq,
+    Idiv {
+        assembly_type: AssemblyType,
+        operand: Operand,
+    },
+    Cdq(AssemblyType),
     Jmp(String),
     JmpCC(ConditionCode, String),
     SetCC(ConditionCode, Operand),
@@ -179,6 +199,7 @@ pub enum Register {
     R9,
     R10,
     R11,
+    SP,
 }
 
 #[allow(unused_variables)]
