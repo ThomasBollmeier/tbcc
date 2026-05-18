@@ -1,7 +1,9 @@
-use std::collections::hash_map::{Entry, Iter};
-use std::collections::HashMap;
 use std::sync::{OnceLock, RwLock};
 use crate::common::Type;
+use crate::common::symbol_table_generic;
+use crate::common::symbol_table_generic::SymbolTable as GenericSymbolTable;
+
+pub type SymbolTable = GenericSymbolTable<SymbolTableEntry>;
 
 static SYMBOL_TABLE: OnceLock<RwLock<SymbolTable>> = OnceLock::new();
 
@@ -22,54 +24,11 @@ pub fn global_symbol_table() -> &'static RwLock<SymbolTable> {
 }
 
 pub fn with_global_symbol_table<T>(f: impl FnOnce(&SymbolTable) -> T) -> T {
-    let table = global_symbol_table()
-        .read()
-        .expect("Global symbol table lock poisoned");
-    f(&table)
+    symbol_table_generic::with_global_symbol_table(global_symbol_table, f)
 }
 
 pub fn with_global_symbol_table_mut<T>(f: impl FnOnce(&mut SymbolTable) -> T) -> T {
-    let mut table = global_symbol_table()
-        .write()
-        .expect("Global symbol table lock poisoned");
-    f(&mut table)
-}
-
-#[derive(Debug, Default)]
-pub struct SymbolTable {
-    entries: HashMap<String, SymbolTableEntry>,
-}
-
-impl SymbolTable {
-    pub fn new() -> Self {
-        Self {
-            entries: HashMap::new(),
-        }
-    }
-
-    pub fn insert(&mut self, name: impl Into<String>, new_entry: SymbolTableEntry) -> Option<SymbolTableEntry> {
-        self.entries.insert(name.into(), new_entry)
-    }
-
-    pub fn get_entry(&self, name: &str) -> Option<&SymbolTableEntry> {
-        self.entries.get(name)
-    }
-
-    pub fn get_entry_cloned(&self, name: &str) -> Option<SymbolTableEntry> {
-        self.entries.get(name).cloned()
-    }
-
-    pub fn get_all_entries(&self) -> Iter<'_, String, SymbolTableEntry> {
-        self.entries.iter()
-    }
-
-    pub fn modify(&mut self, name: &str) -> Entry<'_, String, SymbolTableEntry> {
-        self.entries.entry(name.to_string())
-    }
-
-    pub fn clear(&mut self) {
-        self.entries.clear();
-    }
+    symbol_table_generic::with_global_symbol_table_mut(global_symbol_table, f)
 }
 
 #[derive(Debug, Clone)]

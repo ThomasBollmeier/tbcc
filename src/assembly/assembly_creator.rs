@@ -4,6 +4,8 @@ use crate::assembly::ast::{AssemblyType, StaticVar, TopLevel as TopLevelAsm};
 use crate::assembly::ast::{
     ConditionCode, FuncDef, Instruction, Operand, Program, Register, UnaryOp,
 };
+use crate::assembly::symbol_table as asm_symbol_table;
+use crate::assembly::symbol_table::SymbolTableEntry as AsmSymbolTableEntry;
 use crate::common::{InitValue, Type, symbol_table};
 use crate::tacky::ast::{
     BinaryOperator as TackyBinOp, BinaryOperator, Function, Instruction as TackyInstruction,
@@ -40,7 +42,37 @@ impl AssemblyCreator {
             }
         }
 
+        Self::fill_asm_symbol_table();
+
         Ok(Program::new(top_levels_asm))
+    }
+
+    fn fill_asm_symbol_table() {
+        asm_symbol_table::clear();
+
+        symbol_table::with_global_symbol_table( |table| {
+            for (name, entry) in table.get_all_entries() {
+                let asm_entry = match &entry.attrs {
+                    symbol_table::IdentAttrs::Function { is_defined, .. } => {
+                        AsmSymbolTableEntry::Function { is_defined: *is_defined }
+                    }
+                    symbol_table::IdentAttrs::Static { .. } => {
+                        AsmSymbolTableEntry::Object {
+                            assembly_type: Self::map_type_to_asm_type(&entry.c_type),
+                            is_static: true,
+                        }
+                    }
+                    symbol_table::IdentAttrs::Local => {
+                        AsmSymbolTableEntry::Object {
+                            assembly_type: Self::map_type_to_asm_type(&entry.c_type),
+                            is_static: false,
+                        }
+                    }
+                };
+
+                asm_symbol_table::insert(name, asm_entry);
+            }
+        })
     }
 
     fn create_static_var(&mut self, static_var: &StaticVariable) -> anyhow::Result<StaticVar> {
@@ -171,7 +203,7 @@ impl AssemblyCreator {
         let stack_padding = if stack_args.len() % 2 == 0 { 0 } else { 8 };
 
         if stack_padding > 0 {
-            instructions.push(Instruction::AllocateStack(stack_padding));
+            instructions.push(AssemblyCreator::allocate_stack(stack_padding));
         }
 
         // System V calling convention:
@@ -211,7 +243,7 @@ impl AssemblyCreator {
         // Adjust stack pointer
         let bytes_to_remove = ARG_SIZE * stack_args.len() + stack_padding as usize;
         if bytes_to_remove > 0 {
-            instructions.push(Instruction::DeAllocateStack(bytes_to_remove as i32));
+            instructions.push(AssemblyCreator::deallocate_stack(bytes_to_remove as i32));
         }
 
         // Set return value:
@@ -477,7 +509,7 @@ impl AssemblyCreator {
     fn create_operand(&mut self, value: &Value) -> Operand {
         match value {
             Value::IntegerConstant(i) => Operand::Immediate(*i),
-            Value::LongConstant(_l) => todo!("long constants not supported yet"),
+            Value::LongConstant(l) => Operand::Immediate(*l as i32),
             Value::Variable(name) => Operand::PseudoReg(name.clone()),
         }
     }
@@ -521,7 +553,7 @@ impl AssemblyCreator {
         }
     }
 
-    fn map_type_to_asm_type(c_type: Type) -> AssemblyType {
+    fn map_type_to_asm_type(c_type: &Type) -> AssemblyType {
         use crate::common::Type::*;
         match c_type {
             Int => AssemblyType::Longword,
@@ -532,7 +564,7 @@ impl AssemblyCreator {
 
     fn lookup_asm_type(name: &str) -> AssemblyType {
         match symbol_table::get(name) {
-            Some(entry) => Self::map_type_to_asm_type(entry.c_type),
+            Some(entry) => Self::map_type_to_asm_type(&entry.c_type),
             None => panic!("Symbol not found: {}", name),
         }
     }
@@ -542,6 +574,24 @@ impl AssemblyCreator {
             Value::IntegerConstant(_) => AssemblyType::Longword,
             Value::LongConstant(_) => AssemblyType::Quadword,
             Value::Variable(name) => Self::lookup_asm_type(name),
+        }
+    }
+
+    pub fn allocate_stack(bytes: i32) -> Instruction {
+        Instruction::Binary {
+            assembly_type: AssemblyType::Longword,
+            op: crate::assembly::ast::BinaryOp::Sub,
+            left: Operand::Immediate(bytes),
+            right: Operand::Register(Register::SP),
+        }
+    }
+
+    pub fn deallocate_stack(bytes: i32) -> Instruction {
+        Instruction::Binary {
+            assembly_type: AssemblyType::Longword,
+            op: crate::assembly::ast::BinaryOp::Add,
+            left: Operand::Immediate(bytes),
+            right: Operand::Register(Register::SP),
         }
     }
 }

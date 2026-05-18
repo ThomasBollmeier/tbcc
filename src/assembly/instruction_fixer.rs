@@ -1,3 +1,4 @@
+use crate::assembly::assembly_creator::AssemblyCreator;
 use crate::assembly::ast::{Operand, VisitorMut};
 
 pub struct InstructionFixer;
@@ -27,7 +28,7 @@ impl VisitorMut for InstructionFixer {
         let mut new_instructions = vec![];
 
         // Allocate stack space at the beginning of the function
-        new_instructions.push(AllocateStack(func_def.stack_frame_size as i32));
+        new_instructions.push(AssemblyCreator::allocate_stack(func_def.stack_frame_size as i32));
 
         for instruction in &func_def.instructions {
             match instruction {
@@ -159,6 +160,7 @@ impl VisitorMut for InstructionFixer {
 
 #[cfg(test)]
 mod tests {
+    use crate::assembly::assembly_creator::AssemblyCreator;
     use super::InstructionFixer;
     use crate::assembly::ast::TopLevel::Function;
     use crate::assembly::ast::{AssemblyType, FuncDef, Instruction, Operand, Program, Register, UnaryOp};
@@ -186,8 +188,8 @@ mod tests {
 
         let fixed = apply_fixer(instructions);
 
-        assert!(matches!(fixed[0], Instruction::AllocateStack(0)));
-        assert!(matches!(fixed[1], Instruction::Ret));
+        assert_eq!(fixed[0], AssemblyCreator::allocate_stack(0));
+        assert_eq!(fixed[1], Instruction::Ret);
     }
 
     #[test]
@@ -200,7 +202,7 @@ mod tests {
 
         let fixed = apply_fixer(instructions);
 
-        assert!(matches!(fixed[0], Instruction::AllocateStack(0)));
+        assert_eq!(fixed[0], AssemblyCreator::allocate_stack(0));
 
         match &fixed[1] {
             Instruction::Mov { src, dst, .. } => {
@@ -238,12 +240,12 @@ mod tests {
         let fixed = apply_fixer(instructions);
 
         assert_eq!(fixed.len(), 4);
-        assert!(matches!(fixed[0], Instruction::AllocateStack(0)));
+        assert_eq!(fixed[0], AssemblyCreator::allocate_stack(0));
 
         match &fixed[1] {
             Instruction::Mov { src, dst, .. } => {
-                assert!(matches!(src, Operand::Immediate(1)));
-                assert!(matches!(dst, Operand::Register(Register::AX)));
+                assert_eq!(*src, Operand::Immediate(1));
+                assert_eq!(*dst, Operand::Register(Register::AX));
             }
             _ => panic!("expected mov"),
         }

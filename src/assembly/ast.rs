@@ -102,13 +102,13 @@ pub struct StaticVar {
     pub alignment: i32,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum AssemblyType {
     Longword,
     Quadword,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum Instruction {
     Mov {
         assembly_type: AssemblyType,
@@ -144,14 +144,12 @@ pub enum Instruction {
     JmpCC(ConditionCode, String),
     SetCC(ConditionCode, Operand),
     Label(String),
-    AllocateStack(i32),
-    DeAllocateStack(i32),
     Push(Operand),
     Call(String),
     Ret,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum ConditionCode {
     Eq,
     NotEq,
@@ -161,7 +159,7 @@ pub enum ConditionCode {
     LtEq,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum Operand {
     Immediate(i32),
     Register(Register),

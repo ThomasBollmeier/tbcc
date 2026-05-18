@@ -6,6 +6,7 @@ mod assembly_creator;
 pub mod ast;
 mod instruction_fixer;
 mod pseudo_reg_replacer;
+mod symbol_table;
 
 pub fn create_program(tacky_program: &crate::tacky::ast::Program) -> Result<ast::Program> {
     let mut assembly_creator = AssemblyCreator::new();

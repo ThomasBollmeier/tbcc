@@ -41,6 +41,7 @@ impl CodeGenerator {
             Operand::Register(Register::R9) => "%r9".to_string(),
             Operand::Register(Register::R10) => "%r10".to_string(),
             Operand::Register(Register::R11) => "%r11".to_string(),
+            Operand::Register(Register::SP) => "%rsp".to_string(),
             Operand::Stack(offset) => format!("{}(%rbp)", offset),
             Operand::Data(label) => self.get_variable_op_name(label),
             _ => panic!("Unsupported operand type: {:?}", operand),
@@ -59,6 +60,7 @@ impl CodeGenerator {
             Operand::Register(Register::R9) => "%r9d".to_string(),
             Operand::Register(Register::R10) => "%r10d".to_string(),
             Operand::Register(Register::R11) => "%r11d".to_string(),
+            Operand::Register(Register::SP) => "%rsp".to_string(),
             Operand::Stack(offset) => format!("{}(%rbp)", offset),
             Operand::Data(label) => self.get_variable_op_name(label),
             _ => panic!("Unsupported operand type: {:?}", operand),
@@ -77,6 +79,7 @@ impl CodeGenerator {
             Operand::Register(Register::R9) => "%r9b".to_string(),
             Operand::Register(Register::R10) => "%r10b".to_string(),
             Operand::Register(Register::R11) => "%r11b".to_string(),
+            Operand::Register(Register::SP) => "%rsp".to_string(),
             Operand::Stack(offset) => format!("{}(%rbp)", offset),
             Operand::Data(label) => self.get_variable_op_name(label),
             _ => panic!("Unsupported operand type: {:?}", operand),
@@ -253,9 +256,6 @@ impl Visitor for CodeGenerator {
                 self.write_instruction(&format!("idivl \t{operand_str}"));
             }
             Instruction::Cdq(_) => self.write_instruction("cdq"),
-            Instruction::AllocateStack(size) => {
-                self.write_instruction(&format!("subq \t${size}, %rsp"));
-            }
             Instruction::Cmp { op1, op2, .. } => {
                 let op1_str = self.operand_4byte_to_string(op1);
                 let op2_str = self.operand_4byte_to_string(op2);
@@ -278,9 +278,6 @@ impl Visitor for CodeGenerator {
             Instruction::Label(label) => {
                 let label = self.local_label(label);
                 self.write_label(&label);
-            }
-            Instruction::DeAllocateStack(size) => {
-                self.write_instruction(&format!("addq \t${size}, %rsp"));
             }
             Instruction::Push(operand) => {
                 let operand_str = self.operand_8byte_to_string(operand);
