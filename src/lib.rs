@@ -8,4 +8,3 @@ pub mod common;
 pub mod semantic;
 pub mod tacky;
 pub mod assembly;
-pub mod codegen;

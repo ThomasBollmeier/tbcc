@@ -1,6 +1,6 @@
-use crate::assembly::ast::{FuncDef, Instruction, Operand, VisitorMut};
-use crate::common::symbol_table;
-use crate::common::symbol_table::IdentAttrs;
+use crate::assembly::ast::{AssemblyType, FuncDef, Instruction, Operand, VisitorMut};
+use crate::assembly::symbol_table;
+use crate::assembly::symbol_table::SymbolTableEntry;
 use std::collections::HashMap;
 
 pub struct PseudoRegReplacer {
@@ -24,7 +24,7 @@ impl PseudoRegReplacer {
                 } else if Self::is_static_var(name) {
                     Some(Operand::Data(name.clone()))
                 } else {
-                    self.last_offset -= 4; // Assuming 4 bytes per variable
+                    self.update_last_offset(name);
                     self.var_map.insert(name.clone(), self.last_offset);
                     Some(Operand::Stack(self.last_offset))
                 }
@@ -33,14 +33,34 @@ impl PseudoRegReplacer {
         }
     }
 
+    fn update_last_offset(&mut self, var_name: &str) {
+        let entry = symbol_table::get(var_name)
+            .expect(&format!("variable {var_name} not found in symbol table"));
+        match entry {
+            SymbolTableEntry::Object { assembly_type, .. } => {
+                match assembly_type {
+                    AssemblyType::Longword => self.last_offset -= 4,
+                    AssemblyType::Quadword => {
+                        self.last_offset -= 8;
+                        // Round last offset down to next multiple of 8:
+                        let remainder = self.last_offset % 8;
+                        if remainder != 0 {
+                            self.last_offset -= 8 - remainder.abs();
+                        }
+                    },
+                }
+
+            }
+            _ => panic!("expected object entry for variable {var_name}"),
+        }
+    }
+
     fn is_static_var(name: &str) -> bool {
         let entry = symbol_table::get(name);
         match entry {
-            Some(entry) => {
-                match entry.attrs {
-                    IdentAttrs::Static {..} => true,
-                    _ => false,
-                }
+            Some(entry) => match entry {
+                SymbolTableEntry::Object { is_static, .. } => is_static,
+                _ => false,
             },
             _ => false,
         }
@@ -124,9 +144,13 @@ impl VisitorMut for PseudoRegReplacer {
 
 #[cfg(test)]
 mod tests {
+    use serial_test::serial;
     use super::PseudoRegReplacer;
     use crate::assembly::ast::TopLevel::Function;
-    use crate::assembly::ast::{AssemblyType, FuncDef, Instruction, Operand, Program, Register, UnaryOp};
+    use crate::assembly::ast::{
+        AssemblyType, FuncDef, Instruction, Operand, Program, Register, UnaryOp,
+    };
+    use crate::assembly::symbol_table;
 
     fn apply_replacer(instructions: Vec<Instruction>) -> Vec<Instruction> {
         let func_def = FuncDef::new("main".to_string(), true, instructions);
@@ -144,8 +168,28 @@ mod tests {
         instructions
     }
 
+    fn fill_symbol_table(entries: &[(&str, AssemblyType)]) {
+        symbol_table::clear();
+        for (name, asm_type) in entries {
+            symbol_table::insert(
+                name.to_string(),
+                symbol_table::SymbolTableEntry::Object {
+                    assembly_type: asm_type.clone(),
+                    is_static: false,
+                },
+            );
+        }
+    }
+
     #[test]
+    #[serial]
     fn replaces_distinct_pseudo_registers_with_unique_stack_offsets() {
+        fill_symbol_table(&[
+            ("a", AssemblyType::Longword),
+            ("b", AssemblyType::Longword),
+            ("c", AssemblyType::Longword),
+        ]);
+
         let instructions = vec![
             Instruction::Mov {
                 assembly_type: AssemblyType::Longword,
@@ -178,7 +222,10 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn reuses_stack_offset_for_same_pseudo_register() {
+        fill_symbol_table(&[("tmp", AssemblyType::Longword)]);
+
         let instructions = vec![
             Instruction::Mov {
                 assembly_type: AssemblyType::Longword,

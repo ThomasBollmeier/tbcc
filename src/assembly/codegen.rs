@@ -1,5 +1,7 @@
 use crate::assembly::ast::{BinaryOp, ConditionCode, FuncDef, Instruction, Operand, Program, Register, StaticVar, UnaryOp, Visitor};
-use crate::common::{symbol_table, InitValue};
+use crate::assembly::symbol_table;
+use crate::assembly::symbol_table::SymbolTableEntry;
+use crate::common::InitValue;
 
 pub struct CodeGenerator {
     code: String,
@@ -128,8 +130,8 @@ impl CodeGenerator {
     fn get_function_name(&self, original_function_name: &str) -> String {
         if cfg!(target_os = "linux") {
             match symbol_table::get(&original_function_name) {
-                Some(entry) => match &entry.attrs {
-                    symbol_table::IdentAttrs::Function { is_defined, .. } => {
+                Some(entry) => match &entry {
+                    SymbolTableEntry::Function { is_defined, .. } => {
                         if *is_defined {
                             original_function_name.to_string()
                         } else {

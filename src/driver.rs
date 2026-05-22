@@ -1,6 +1,6 @@
 use crate::assembly;
 use crate::cli::Options;
-use crate::codegen::CodeGenerator;
+use crate::assembly::codegen::CodeGenerator;
 use crate::lexer::Lexer;
 use crate::parser::Parser;
 use crate::semantic;
