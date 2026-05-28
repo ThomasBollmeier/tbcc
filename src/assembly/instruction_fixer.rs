@@ -165,11 +165,13 @@ mod tests {
     use crate::assembly::ast::TopLevel::Function;
     use crate::assembly::ast::{AssemblyType, FuncDef, Instruction, Operand, Program, Register, UnaryOp};
     use crate::assembly::pseudo_reg_replacer::PseudoRegReplacer;
+    use crate::common::symbol_table_generic::SymbolTable;
 
     fn apply_fixer(instructions: Vec<Instruction>) -> Vec<Instruction> {
         let func_def = FuncDef::new("main".to_string(), true, instructions);
         let mut program = Program::new(vec![Function(func_def)]);
-        let mut pseudo_reg_replacer = PseudoRegReplacer::new();
+        let asm_symbol_table = SymbolTable::new_ref();
+        let mut pseudo_reg_replacer = PseudoRegReplacer::new(asm_symbol_table.clone());
         program.walk_mut(&mut pseudo_reg_replacer);
         let mut fixer = InstructionFixer::new();
         program.walk_mut(&mut fixer);

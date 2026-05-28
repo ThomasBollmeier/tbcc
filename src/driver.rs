@@ -1,6 +1,7 @@
 use crate::assembly;
-use crate::cli::Options;
 use crate::assembly::codegen::CodeGenerator;
+use crate::cli::Options;
+use crate::common::symbol_table_generic::SymbolTable;
 use crate::lexer::Lexer;
 use crate::parser::Parser;
 use crate::semantic;
@@ -67,28 +68,38 @@ fn compile_file(source_file: &str, options: &Options) -> Result<Option<String>> 
 
     let var_name_generator = semantic::make_var_name_generator();
     let label_name_generator = semantic::make_label_name_generator();
+    let symbol_table = SymbolTable::new_ref();
 
-    semantic::validate(&var_name_generator, &label_name_generator, &mut program)?;
+    semantic::validate(
+        &var_name_generator,
+        &label_name_generator,
+        symbol_table.clone(),
+        &mut program,
+    )?;
 
     if options.validate {
         return Ok(None);
     }
 
     let tmp_var_name_generator = semantic::make_temp_var_name_generator();
-    let mut tacky_emitter = TackyEmitter::new(label_name_generator, tmp_var_name_generator);
+    let mut tacky_emitter = TackyEmitter::new(
+        label_name_generator,
+        tmp_var_name_generator,
+        symbol_table.clone(),
+    );
     let tacky_program = tacky_emitter.emit_program(&program)?;
 
     if options.tacky {
         return Ok(None);
     }
 
-    let asm_program = assembly::create_program(&tacky_program)?;
+    let (asm_program, asm_symbol_table) = assembly::create_program(&tacky_program, symbol_table.clone())?;
 
     if options.codegen {
         return Ok(None);
     }
 
-    let assembly_code = CodeGenerator::new().generate_assembly(&asm_program);
+    let assembly_code = CodeGenerator::new(asm_symbol_table).generate_assembly(&asm_program);
     let assembly_file = create_assembly_file(&source_file, &assembly_code)?;
 
     Ok(Some(assembly_file))

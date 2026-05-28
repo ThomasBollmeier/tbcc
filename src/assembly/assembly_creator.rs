@@ -4,8 +4,9 @@ use crate::assembly::ast::{AssemblyType, StaticVar, TopLevel as TopLevelAsm};
 use crate::assembly::ast::{
     ConditionCode, FuncDef, Instruction, Operand, Program, Register, UnaryOp,
 };
-use crate::assembly::symbol_table as asm_symbol_table;
 use crate::assembly::symbol_table::SymbolTableEntry as AsmSymbolTableEntry;
+use crate::common::symbol_table::SymbolTableEntry;
+use crate::common::symbol_table_generic::{SymbolTable, SymbolTableRef};
 use crate::common::{InitValue, Type, symbol_table};
 use crate::tacky::ast::{
     BinaryOperator as TackyBinOp, BinaryOperator, Function, Instruction as TackyInstruction,
@@ -15,19 +16,21 @@ use crate::tacky::ast::{
 #[derive(Debug)]
 pub struct AssemblyCreator {
     arg_registers: [Register; 6],
+    symbol_table: SymbolTableRef<SymbolTableEntry>,
 }
 
 impl AssemblyCreator {
-    pub fn new() -> AssemblyCreator {
+    pub fn new(symbol_table: SymbolTableRef<SymbolTableEntry>) -> AssemblyCreator {
         AssemblyCreator {
             arg_registers: [DI, SI, DX, CX, R8, R9],
+            symbol_table: symbol_table.clone(),
         }
     }
 
     pub fn create_program(
         &mut self,
         tacky_program: &crate::tacky::ast::Program,
-    ) -> anyhow::Result<Program> {
+    ) -> anyhow::Result<(Program, SymbolTableRef<AsmSymbolTableEntry>)> {
         let mut top_levels_asm = vec![];
         for top_level in &tacky_program.0 {
             match top_level {
@@ -42,37 +45,37 @@ impl AssemblyCreator {
             }
         }
 
-        Self::fill_asm_symbol_table();
+        let asm_symbol_table = self.fill_asm_symbol_table();
 
-        Ok(Program::new(top_levels_asm))
+        Ok((Program::new(top_levels_asm), asm_symbol_table))
     }
 
-    fn fill_asm_symbol_table() {
-        asm_symbol_table::clear();
+    fn fill_asm_symbol_table(&self) -> SymbolTableRef<AsmSymbolTableEntry> {
+        let asm_symbol_table: SymbolTableRef<AsmSymbolTableEntry> = SymbolTable::new_ref();
 
-        symbol_table::with_global_symbol_table( |table| {
-            for (name, entry) in table.get_all_entries() {
-                let asm_entry = match &entry.attrs {
-                    symbol_table::IdentAttrs::Function { is_defined, .. } => {
-                        AsmSymbolTableEntry::Function { is_defined: *is_defined }
+        for (name, entry) in self.symbol_table.borrow().get_all_entries() {
+            let asm_entry = match &entry.attrs {
+                symbol_table::IdentAttrs::Function { is_defined, .. } => {
+                    AsmSymbolTableEntry::Function {
+                        is_defined: *is_defined,
                     }
-                    symbol_table::IdentAttrs::Static { .. } => {
-                        AsmSymbolTableEntry::Object {
-                            assembly_type: Self::map_type_to_asm_type(&entry.c_type),
-                            is_static: true,
-                        }
-                    }
-                    symbol_table::IdentAttrs::Local => {
-                        AsmSymbolTableEntry::Object {
-                            assembly_type: Self::map_type_to_asm_type(&entry.c_type),
-                            is_static: false,
-                        }
-                    }
-                };
+                }
+                symbol_table::IdentAttrs::Static { .. } => AsmSymbolTableEntry::Object {
+                    assembly_type: Self::map_type_to_asm_type(&entry.c_type),
+                    is_static: true,
+                },
+                symbol_table::IdentAttrs::Local => AsmSymbolTableEntry::Object {
+                    assembly_type: Self::map_type_to_asm_type(&entry.c_type),
+                    is_static: false,
+                },
+            };
 
-                asm_symbol_table::insert(name, asm_entry);
-            }
-        })
+            asm_symbol_table
+                .borrow_mut()
+                .insert(name.clone(), asm_entry);
+        }
+
+        asm_symbol_table
     }
 
     fn create_static_var(&mut self, static_var: &StaticVariable) -> anyhow::Result<StaticVar> {
@@ -104,7 +107,7 @@ impl AssemblyCreator {
                 Stack(offset as i32)
             };
 
-            let assembly_type = Self::lookup_asm_type(param);
+            let assembly_type = self.lookup_asm_type(param);
             let dst = Operand::PseudoReg(param.clone());
             instructions.push(Instruction::Mov {
                 assembly_type,
@@ -209,7 +212,7 @@ impl AssemblyCreator {
         // System V calling convention:
         // First 6 arguments into registers
         for (reg_index, arg) in register_args.iter().enumerate() {
-            let assembly_type = Self::get_asm_type(arg);
+            let assembly_type = self.get_asm_type(arg);
             let src = self.create_operand(arg);
             let dst = Operand::Register(self.arg_registers[reg_index].clone());
             instructions.push(Instruction::Mov {
@@ -221,7 +224,7 @@ impl AssemblyCreator {
 
         // Remaining arguments pushed onto stack
         for arg in stack_args.iter().rev() {
-            let assembly_type = Self::get_asm_type(arg);
+            let assembly_type = self.get_asm_type(arg);
             let op = self.create_operand(arg);
             match op {
                 Operand::Register(_) | Operand::Immediate(_) => {
@@ -247,7 +250,7 @@ impl AssemblyCreator {
         }
 
         // Set return value:
-        let assembly_type = Self::get_asm_type(dst);
+        let assembly_type = self.get_asm_type(dst);
         instructions.push(Instruction::Mov {
             assembly_type,
             src: Operand::Register(AX),
@@ -258,7 +261,7 @@ impl AssemblyCreator {
     fn push_return(&mut self, instructions: &mut Vec<Instruction>, value: &Value) {
         use crate::assembly::ast::Instruction::*;
 
-        let assembly_type = Self::get_asm_type(value);
+        let assembly_type = self.get_asm_type(value);
         let src = self.create_operand(value);
         instructions.push(Mov {
             assembly_type,
@@ -274,12 +277,12 @@ impl AssemblyCreator {
         let src_op = self.create_operand(src);
         let dst_op = self.create_operand(dst);
         instructions.push(Cmp {
-            assembly_type: Self::get_asm_type(src),
+            assembly_type: self.get_asm_type(src),
             op1: Operand::Immediate(0),
             op2: src_op,
         });
         instructions.push(Mov {
-            assembly_type: Self::get_asm_type(dst),
+            assembly_type: self.get_asm_type(dst),
             src: Operand::Immediate(0),
             dst: dst_op.clone(),
         });
@@ -295,7 +298,7 @@ impl AssemblyCreator {
     ) {
         use crate::assembly::ast::Instruction::*;
 
-        let assembly_type = Self::get_asm_type(src);
+        let assembly_type = self.get_asm_type(src);
         let src_op = self.create_operand(src);
         let dst_op = self.create_operand(dst);
         let unary_op = self.map_unary_operator(op);
@@ -321,7 +324,7 @@ impl AssemblyCreator {
     ) {
         use crate::assembly::ast::Instruction::*;
 
-        let assembly_type = Self::get_asm_type(src1);
+        let assembly_type = self.get_asm_type(src1);
         let src1_op = self.create_operand(src1);
         let src2_op = self.create_operand(src2);
         let dst_op = self.create_operand(dst);
@@ -352,7 +355,7 @@ impl AssemblyCreator {
     ) {
         use crate::assembly::ast::Instruction::*;
 
-        let assembly_type = Self::get_asm_type(src1);
+        let assembly_type = self.get_asm_type(src1);
         let src1_op = self.create_operand(src1);
         let src2_op = self.create_operand(src2);
         let dst_op = self.create_operand(dst);
@@ -410,13 +413,13 @@ impl AssemblyCreator {
         let dst_op = self.create_operand(dst);
 
         instructions.push(Cmp {
-            assembly_type: Self::get_asm_type(src1),
+            assembly_type: self.get_asm_type(src1),
             op1: src2_op,
             op2: src1_op,
         });
         let condition_code = self.map_relational_operator(op);
         instructions.push(Mov {
-            assembly_type: Self::get_asm_type(dst),
+            assembly_type: self.get_asm_type(dst),
             src: Operand::Immediate(0),
             dst: dst_op.clone(),
         });
@@ -433,7 +436,7 @@ impl AssemblyCreator {
     ) {
         use crate::assembly::ast::Instruction::*;
 
-        let assembly_type = Self::get_asm_type(src1);
+        let assembly_type = self.get_asm_type(src1);
         let src1_op = self.create_operand(src1);
         let src2_op = self.create_operand(src2);
         let dst_op = self.create_operand(dst);
@@ -466,7 +469,7 @@ impl AssemblyCreator {
 
         let condition_op = self.create_operand(condition);
         instructions.push(Cmp {
-            assembly_type: Self::get_asm_type(condition),
+            assembly_type: self.get_asm_type(condition),
             op1: Operand::Immediate(0),
             op2: condition_op,
         });
@@ -483,7 +486,7 @@ impl AssemblyCreator {
 
         let condition_op = self.create_operand(condition);
         instructions.push(Cmp {
-            assembly_type: Self::get_asm_type(condition),
+            assembly_type: self.get_asm_type(condition),
             op1: Operand::Immediate(0),
             op2: condition_op,
         });
@@ -496,7 +499,7 @@ impl AssemblyCreator {
         let src_op = self.create_operand(src);
         let dst_op = self.create_operand(dst);
         instructions.push(Mov {
-            assembly_type: Self::get_asm_type(src),
+            assembly_type: self.get_asm_type(src),
             src: src_op,
             dst: dst_op,
         });
@@ -562,18 +565,18 @@ impl AssemblyCreator {
         }
     }
 
-    fn lookup_asm_type(name: &str) -> AssemblyType {
-        match symbol_table::get(name) {
+    fn lookup_asm_type(&self, name: &str) -> AssemblyType {
+        match self.symbol_table.borrow().get_entry(name) {
             Some(entry) => Self::map_type_to_asm_type(&entry.c_type),
             None => panic!("Symbol not found: {}", name),
         }
     }
 
-    fn get_asm_type(value: &Value) -> AssemblyType {
+    fn get_asm_type(&self, value: &Value) -> AssemblyType {
         match value {
             Value::IntegerConstant(_) => AssemblyType::Longword,
             Value::LongConstant(_) => AssemblyType::Quadword,
-            Value::Variable(name) => Self::lookup_asm_type(name),
+            Value::Variable(name) => self.lookup_asm_type(name),
         }
     }
 
@@ -603,6 +606,7 @@ mod tests {
         BinaryOp as AsmBinaryOp, Instruction as AsmInstruction, Operand as AsmOperand,
         Register as AsmRegister,
     };
+    use crate::common::symbol_table::IdentAttrs;
     use crate::lexer::Lexer;
     use crate::parser::Parser;
     use crate::semantic;
@@ -613,21 +617,26 @@ mod tests {
         Program as TackyProgram, Value,
     };
     use anyhow::Result;
-    use crate::common::symbol_table::IdentAttrs;
 
     fn make_emitter(
         label_name_gen: &NameGeneratorRef,
         tmp_var_name_gen: &NameGeneratorRef,
+        symbol_table: SymbolTableRef<SymbolTableEntry>,
     ) -> TackyEmitter {
-        TackyEmitter::new(label_name_gen.clone(), tmp_var_name_gen.clone())
+        TackyEmitter::new(
+            label_name_gen.clone(),
+            tmp_var_name_gen.clone(),
+            symbol_table,
+        )
     }
 
     fn validate(
         var_name_gen: &NameGeneratorRef,
         label_name_gen: &NameGeneratorRef,
+        symbol_table: SymbolTableRef<SymbolTableEntry>,
         program: &mut crate::ast::Program,
     ) -> Result<()> {
-        semantic::validate(var_name_gen, label_name_gen, program)
+        semantic::validate(var_name_gen, label_name_gen, symbol_table, program)
     }
 
     #[test]
@@ -643,19 +652,24 @@ mod tests {
         let var_name_gen = semantic::make_var_name_generator();
         let label_name_gen = semantic::make_label_name_generator();
         let tmp_var_name_gen = semantic::make_temp_var_name_generator();
+        let symbol_table = SymbolTable::new_ref();
 
-        symbol_table::clear();
+        validate(
+            &var_name_gen,
+            &label_name_gen,
+            symbol_table.clone(),
+            &mut program,
+        )
+        .expect("Failed to validate program");
 
-        validate(&var_name_gen, &label_name_gen, &mut program)
-            .expect("Failed to validate program");
-
-        let mut tacky_emitter = make_emitter(&label_name_gen, &tmp_var_name_gen);
+        let mut tacky_emitter =
+            make_emitter(&label_name_gen, &tmp_var_name_gen, symbol_table.clone());
         let tacky_program = tacky_emitter
             .emit_program(&program)
             .expect("Failed to emit");
 
-        let mut assembly_creator = AssemblyCreator::new();
-        let assembly_program = assembly_creator
+        let mut assembly_creator = AssemblyCreator::new(symbol_table);
+        let (assembly_program, _) = assembly_creator
             .create_program(&tacky_program)
             .expect("Failed to create assembly program");
 
@@ -664,14 +678,17 @@ mod tests {
 
     #[test]
     fn creates_asm_program_with_binary_ops() {
+        let symbol_table: SymbolTableRef<SymbolTableEntry> = SymbolTable::new_ref();
 
-        symbol_table::clear();
         for i in 0..=4 {
             let var_name = format!("tmp.{}", i);
-            symbol_table::insert(&var_name, symbol_table::SymbolTableEntry {
-                c_type: Type::Int,
-                attrs: IdentAttrs::Local,
-            });
+            symbol_table.borrow_mut().insert(
+                &var_name,
+                SymbolTableEntry {
+                    c_type: Type::Int,
+                    attrs: IdentAttrs::Local,
+                },
+            );
         }
 
         let tacky_program = TackyProgram(vec![TopLevel::Function(TackyFunctionDef {
@@ -713,8 +730,8 @@ mod tests {
             ],
         })]);
 
-        let mut assembly_creator = AssemblyCreator::new();
-        let assembly_program = assembly_creator
+        let mut assembly_creator = AssemblyCreator::new(symbol_table);
+        let (assembly_program, _) = assembly_creator
             .create_program(&tacky_program)
             .expect("Failed to create assembly program");
 

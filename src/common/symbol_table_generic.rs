@@ -1,45 +1,9 @@
+use std::cell::RefCell;
 use std::collections::HashMap;
 use std::collections::hash_map::{Entry, Iter};
-use std::sync::RwLock;
+use std::rc::Rc;
 
-pub fn get<E: Clone + 'static>(
-    singleton_fn: impl FnOnce() -> &'static RwLock<SymbolTable<E>>,
-    name: &str,
-) -> Option<E> {
-    with_global_symbol_table(singleton_fn, |table| table.get_entry_cloned(name))
-}
-
-pub fn insert<E: Clone + 'static>(
-    singleton_fn: impl FnOnce() -> &'static RwLock<SymbolTable<E>>,
-    name: impl Into<String>,
-    new_entry: E,
-) -> Option<E> {
-    with_global_symbol_table_mut(singleton_fn, |table| table.insert(name, new_entry))
-}
-
-pub fn clear<E: Clone + 'static>(singleton_fn: impl FnOnce() -> &'static RwLock<SymbolTable<E>>) {
-    with_global_symbol_table_mut(singleton_fn, |table| table.clear());
-}
-
-pub fn with_global_symbol_table<T, E: Clone + 'static>(
-    singleton_fn: impl FnOnce() -> &'static RwLock<SymbolTable<E>>,
-    f: impl FnOnce(&SymbolTable<E>) -> T,
-) -> T {
-    let table = singleton_fn()
-        .read()
-        .expect("Global symbol table lock poisoned");
-    f(&table)
-}
-
-pub fn with_global_symbol_table_mut<T, E: Clone + 'static>(
-    singleton_fn: impl FnOnce() -> &'static RwLock<SymbolTable<E>>,
-    f: impl FnOnce(&mut SymbolTable<E>) -> T,
-) -> T {
-    let mut table = singleton_fn()
-        .write()
-        .expect("Global symbol table lock poisoned");
-    f(&mut table)
-}
+pub type SymbolTableRef<E> = Rc<RefCell<SymbolTable<E>>>;
 
 #[derive(Debug, Default)]
 pub struct SymbolTable<E>
@@ -54,6 +18,10 @@ impl<E: Clone> SymbolTable<E> {
         Self {
             entries: HashMap::new(),
         }
+    }
+
+    pub fn new_ref() -> SymbolTableRef<E> {
+        Rc::new(RefCell::new(SymbolTable::new()))
     }
 
     pub fn insert(&mut self, name: impl Into<String>, new_entry: E) -> Option<E> {

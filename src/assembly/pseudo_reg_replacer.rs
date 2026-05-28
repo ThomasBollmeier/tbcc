@@ -1,18 +1,20 @@
 use crate::assembly::ast::{AssemblyType, FuncDef, Instruction, Operand, VisitorMut};
-use crate::assembly::symbol_table;
 use crate::assembly::symbol_table::SymbolTableEntry;
+use crate::common::symbol_table_generic::SymbolTableRef;
 use std::collections::HashMap;
 
 pub struct PseudoRegReplacer {
     var_map: HashMap<String, i32>,
     last_offset: i32,
+    asm_symbol_table: SymbolTableRef<SymbolTableEntry>,
 }
 
 impl PseudoRegReplacer {
-    pub fn new() -> Self {
+    pub fn new(asm_symbol_table: SymbolTableRef<SymbolTableEntry>) -> Self {
         Self {
             var_map: HashMap::new(),
             last_offset: 0,
+            asm_symbol_table,
         }
     }
 
@@ -21,7 +23,7 @@ impl PseudoRegReplacer {
             Operand::PseudoReg(name) => {
                 if let Some(offset) = self.var_map.get(name) {
                     Some(Operand::Stack(*offset))
-                } else if Self::is_static_var(name) {
+                } else if self.is_static_var(name) {
                     Some(Operand::Data(name.clone()))
                 } else {
                     self.update_last_offset(name);
@@ -34,7 +36,10 @@ impl PseudoRegReplacer {
     }
 
     fn update_last_offset(&mut self, var_name: &str) {
-        let entry = symbol_table::get(var_name)
+        let entry = self
+            .asm_symbol_table
+            .borrow_mut()
+            .get_entry_cloned(var_name)
             .expect(&format!("variable {var_name} not found in symbol table"));
         match entry {
             SymbolTableEntry::Object { assembly_type, .. } => {
@@ -47,16 +52,15 @@ impl PseudoRegReplacer {
                         if remainder != 0 {
                             self.last_offset -= 8 - remainder.abs();
                         }
-                    },
+                    }
                 }
-
             }
             _ => panic!("expected object entry for variable {var_name}"),
         }
     }
 
-    fn is_static_var(name: &str) -> bool {
-        let entry = symbol_table::get(name);
+    fn is_static_var(&self, name: &str) -> bool {
+        let entry = self.asm_symbol_table.borrow().get_entry_cloned(name);
         match entry {
             Some(entry) => match entry {
                 SymbolTableEntry::Object { is_static, .. } => is_static,
@@ -144,18 +148,21 @@ impl VisitorMut for PseudoRegReplacer {
 
 #[cfg(test)]
 mod tests {
-    use serial_test::serial;
     use super::PseudoRegReplacer;
     use crate::assembly::ast::TopLevel::Function;
     use crate::assembly::ast::{
         AssemblyType, FuncDef, Instruction, Operand, Program, Register, UnaryOp,
     };
-    use crate::assembly::symbol_table;
+    use crate::assembly::symbol_table::SymbolTableEntry;
+    use crate::common::symbol_table_generic::{SymbolTable, SymbolTableRef};
 
-    fn apply_replacer(instructions: Vec<Instruction>) -> Vec<Instruction> {
+    fn apply_replacer(
+        instructions: Vec<Instruction>,
+        asm_symbol_table: SymbolTableRef<SymbolTableEntry>,
+    ) -> Vec<Instruction> {
         let func_def = FuncDef::new("main".to_string(), true, instructions);
         let mut program = Program::new(vec![Function(func_def)]);
-        let mut replacer = PseudoRegReplacer::new();
+        let mut replacer = PseudoRegReplacer::new(asm_symbol_table);
         program.walk_mut(&mut replacer);
 
         let function = &program.top_levels[0];
@@ -168,23 +175,24 @@ mod tests {
         instructions
     }
 
-    fn fill_symbol_table(entries: &[(&str, AssemblyType)]) {
-        symbol_table::clear();
+    fn fill_symbol_table(entries: &[(&str, AssemblyType)]) -> SymbolTableRef<SymbolTableEntry> {
+        let asm_symbol_table = SymbolTable::new_ref();
         for (name, asm_type) in entries {
-            symbol_table::insert(
+            asm_symbol_table.borrow_mut().insert(
                 name.to_string(),
-                symbol_table::SymbolTableEntry::Object {
+                SymbolTableEntry::Object {
                     assembly_type: asm_type.clone(),
                     is_static: false,
                 },
             );
         }
+
+        asm_symbol_table
     }
 
     #[test]
-    #[serial]
     fn replaces_distinct_pseudo_registers_with_unique_stack_offsets() {
-        fill_symbol_table(&[
+        let asm_symbol_table = fill_symbol_table(&[
             ("a", AssemblyType::Longword),
             ("b", AssemblyType::Longword),
             ("c", AssemblyType::Longword),
@@ -203,7 +211,7 @@ mod tests {
             },
         ];
 
-        let instructions = apply_replacer(instructions);
+        let instructions = apply_replacer(instructions, asm_symbol_table.clone());
 
         match &instructions[0] {
             Instruction::Mov { src, dst, .. } => {
@@ -222,9 +230,8 @@ mod tests {
     }
 
     #[test]
-    #[serial]
     fn reuses_stack_offset_for_same_pseudo_register() {
-        fill_symbol_table(&[("tmp", AssemblyType::Longword)]);
+        let asm_symbol_table = fill_symbol_table(&[("tmp", AssemblyType::Longword)]);
 
         let instructions = vec![
             Instruction::Mov {
@@ -239,7 +246,7 @@ mod tests {
             },
         ];
 
-        let instructions = apply_replacer(instructions);
+        let instructions = apply_replacer(instructions, asm_symbol_table.clone());
 
         match &instructions[0] {
             Instruction::Mov { src, dst, .. } => {
@@ -259,6 +266,8 @@ mod tests {
 
     #[test]
     fn leaves_non_pseudo_operands_unchanged() {
+        let asm_symbol_table = SymbolTable::new_ref();
+
         let instructions = vec![
             Instruction::Mov {
                 assembly_type: AssemblyType::Longword,
@@ -268,7 +277,7 @@ mod tests {
             Instruction::Ret,
         ];
 
-        let instructions = apply_replacer(instructions);
+        let instructions = apply_replacer(instructions, asm_symbol_table);
 
         match &instructions[0] {
             Instruction::Mov { src, dst, .. } => {

@@ -1,16 +1,21 @@
-use crate::assembly::ast::{BinaryOp, ConditionCode, FuncDef, Instruction, Operand, Program, Register, StaticVar, UnaryOp, Visitor};
-use crate::assembly::symbol_table;
+use crate::assembly::ast::{
+    BinaryOp, ConditionCode, FuncDef, Instruction, Operand, Program, Register, StaticVar, UnaryOp,
+    Visitor,
+};
 use crate::assembly::symbol_table::SymbolTableEntry;
 use crate::common::InitValue;
+use crate::common::symbol_table_generic::SymbolTableRef;
 
 pub struct CodeGenerator {
     code: String,
+    asm_symbol_table: SymbolTableRef<SymbolTableEntry>,
 }
 
 impl CodeGenerator {
-    pub fn new() -> Self {
+    pub fn new(asm_symbol_table: SymbolTableRef<SymbolTableEntry>) -> Self {
         CodeGenerator {
             code: String::new(),
+            asm_symbol_table,
         }
     }
 
@@ -129,7 +134,11 @@ impl CodeGenerator {
 
     fn get_function_name(&self, original_function_name: &str) -> String {
         if cfg!(target_os = "linux") {
-            match symbol_table::get(&original_function_name) {
+            match self
+                .asm_symbol_table
+                .borrow()
+                .get_entry_cloned(&original_function_name)
+            {
                 Some(entry) => match &entry {
                     SymbolTableEntry::Function { is_defined, .. } => {
                         if *is_defined {
@@ -140,7 +149,10 @@ impl CodeGenerator {
                     }
                     _ => panic!("Expected '{}' to be a function", original_function_name),
                 },
-                None => panic!("Function '{}' not found in symbol table", original_function_name),
+                None => panic!(
+                    "Function '{}' not found in symbol table",
+                    original_function_name
+                ),
             }
         } else if cfg!(target_os = "macos") {
             format!("_{}", original_function_name)
@@ -247,7 +259,9 @@ impl Visitor for CodeGenerator {
                 let operand_str = self.operand_4byte_to_string(operand);
                 self.write_instruction(&format!("{op_str} \t{operand_str}"));
             }
-            Instruction::Binary { op, left, right, .. } => {
+            Instruction::Binary {
+                op, left, right, ..
+            } => {
                 let op_str = self.binary_op_to_string(op);
                 let left_str = self.operand_4byte_to_string(left);
                 let right_str = self.operand_4byte_to_string(right);
@@ -296,17 +310,18 @@ impl Visitor for CodeGenerator {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::assembly;
+    use crate::common::symbol_table_generic::SymbolTable;
     use crate::lexer::Lexer;
     use crate::parser::Parser;
     use crate::semantic;
     use crate::tacky::TackyEmitter;
-    use crate::assembly;
 
     #[test]
     fn creates_asm_program_ok() {
         let code = "int main(void) { return -(~42); }";
-        let assembly_program = create_assembly(code);
-        let code_generator = CodeGenerator::new();
+        let (assembly_program, asm_symbol_table) = create_assembly(code);
+        let code_generator = CodeGenerator::new(asm_symbol_table);
         let asm_code = code_generator.generate_assembly(&assembly_program);
 
         assert!(!asm_code.is_empty());
@@ -317,8 +332,8 @@ mod tests {
     #[test]
     fn generates_asm_with_comparisons_and_jumps() {
         let code = "int main(void) { return (1 < 2) && (3 != 4); }";
-        let assembly_program = create_assembly(code);
-        let code_generator = CodeGenerator::new();
+        let (assembly_program, asm_symbol_table) = create_assembly(code);
+        let code_generator = CodeGenerator::new(asm_symbol_table);
         let asm_code = code_generator.generate_assembly(&assembly_program);
 
         assert!(
@@ -371,14 +386,14 @@ mod tests {
             }
         "#;
 
-        let assembly_program = create_assembly(code);
-        let code_generator = CodeGenerator::new();
+        let (assembly_program, asm_symbol_table) = create_assembly(code);
+        let code_generator = CodeGenerator::new(asm_symbol_table);
         let asm_code = code_generator.generate_assembly(&assembly_program);
 
         print!("{asm_code}");
     }
 
-    fn create_assembly(code: &str) -> Program {
+    fn create_assembly(code: &str) -> (Program, SymbolTableRef<SymbolTableEntry>) {
         let parser = Parser::new();
         let lexer = Lexer::new();
 
@@ -388,15 +403,23 @@ mod tests {
         let var_name_gen = semantic::make_var_name_generator();
         let label_name_gen = semantic::make_label_name_generator();
         let tmp_var_name_gen = semantic::make_temp_var_name_generator();
+        let symbol_table = SymbolTable::new_ref();
 
-        semantic::validate(&var_name_gen, &label_name_gen, &mut program)
-            .expect("Semantic validation failed");
+        semantic::validate(
+            &var_name_gen,
+            &label_name_gen,
+            symbol_table.clone(),
+            &mut program,
+        )
+        .expect("Semantic validation failed");
 
-        let mut tacky_emitter = TackyEmitter::new(label_name_gen, tmp_var_name_gen);
+        let mut tacky_emitter =
+            TackyEmitter::new(label_name_gen, tmp_var_name_gen, symbol_table.clone());
         let tacky_program = tacky_emitter
             .emit_program(&program)
             .expect("Failed to emit tacky program");
 
-        assembly::create_program(&tacky_program).expect("Failed to create assembly program")
+        assembly::create_program(&tacky_program, symbol_table)
+            .expect("Failed to create assembly program")
     }
 }

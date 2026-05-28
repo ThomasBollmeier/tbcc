@@ -5,25 +5,29 @@ use crate::ast::{
     BinaryOp, Block, BlockItem, Expression, ForInit, FunctionDeclaration, Label, Statement,
     StorageClass, TypedExpression, UnaryOp, VarDeclaration,
 };
-use crate::common::{symbol_table, Type};
 use crate::common::symbol_table::{IdentAttrs, InitValue, InitialValue, SymbolTableEntry};
+use crate::common::symbol_table_generic::SymbolTableRef;
+use crate::common::{Type};
 use crate::semantic::NameGeneratorRef;
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 
 #[derive(Clone)]
 pub struct TackyEmitter {
     label_name_generator: NameGeneratorRef,
     tmp_var_name_generator: NameGeneratorRef,
+    symbol_table: SymbolTableRef<SymbolTableEntry>,
 }
 
 impl TackyEmitter {
     pub fn new(
         label_name_generator: NameGeneratorRef,
         tmp_var_name_generator: NameGeneratorRef,
+        symbol_table: SymbolTableRef<SymbolTableEntry>,
     ) -> TackyEmitter {
         TackyEmitter {
             label_name_generator,
             tmp_var_name_generator,
+            symbol_table,
         }
     }
 
@@ -41,43 +45,42 @@ impl TackyEmitter {
             .map(TopLevel::Function)
             .collect::<Vec<TopLevel>>();
 
-        top_levels.extend(Self::read_var_decls_from_symbol_table());
+        top_levels.extend(self.read_var_decls_from_symbol_table());
 
         Ok(Program(top_levels))
     }
 
-    fn read_var_decls_from_symbol_table() -> Vec<TopLevel> {
-        symbol_table::with_global_symbol_table(|table| {
-            table
-                .get_all_entries()
-                .filter_map(|(name, entry)| match &entry.attrs {
-                    IdentAttrs::Static {
-                        is_global,
-                        init_value,
-                    } => {
-                        let initial_value = match init_value {
-                            Some(InitialValue::Initialized(InitValue::Int(ival))) => {
-                                IntegerConstant(*ival)
-                            }
-                            Some(InitialValue::Initialized(InitValue::Long(lval))) => {
-                                LongConstant(*lval)
-                            }
-                            Some(InitialValue::Tentative) => IntegerConstant(0),
-                            None => return None,
-                        };
-                        Some(TopLevel::StaticVariable(
-                            crate::tacky::ast::StaticVariable {
-                                name: name.clone(),
-                                is_global: *is_global,
-                                initial_value,
-                                c_type: entry.c_type.clone(),
-                            },
-                        ))
-                    }
-                    _ => None,
-                })
-                .collect()
-        })
+    fn read_var_decls_from_symbol_table(&self) -> Vec<TopLevel> {
+        self.symbol_table
+            .borrow()
+            .get_all_entries()
+            .filter_map(|(name, entry)| match &entry.attrs {
+                IdentAttrs::Static {
+                    is_global,
+                    init_value,
+                } => {
+                    let initial_value = match init_value {
+                        Some(InitialValue::Initialized(InitValue::Int(ival))) => {
+                            IntegerConstant(*ival)
+                        }
+                        Some(InitialValue::Initialized(InitValue::Long(lval))) => {
+                            LongConstant(*lval)
+                        }
+                        Some(InitialValue::Tentative) => IntegerConstant(0),
+                        None => return None,
+                    };
+                    Some(TopLevel::StaticVariable(
+                        crate::tacky::ast::StaticVariable {
+                            name: name.clone(),
+                            is_global: *is_global,
+                            initial_value,
+                            c_type: entry.c_type.clone(),
+                        },
+                    ))
+                }
+                _ => None,
+            })
+            .collect()
     }
 
     fn emit_function_decl(
@@ -93,7 +96,10 @@ impl TackyEmitter {
             vec![]
         };
 
-        let entry = symbol_table::get(&name)
+        let entry = self
+            .symbol_table
+            .borrow()
+            .get_entry_cloned(&name)
             .ok_or_else(|| anyhow!("Function {} not found in symbol table", name))?;
         let is_global = match entry.attrs {
             IdentAttrs::Function { is_global, .. } => is_global,
@@ -453,7 +459,13 @@ impl TackyEmitter {
                 condition,
                 then_expr,
                 else_expr,
-            } => self.emit_conditional_expr(condition, then_expr, else_expr, &expr_type, instructions),
+            } => self.emit_conditional_expr(
+                condition,
+                then_expr,
+                else_expr,
+                &expr_type,
+                instructions,
+            ),
             Expression::FuncCall { name, args } => {
                 self.emit_func_call_expr(name, args, &expr_type, instructions)
             }
@@ -753,7 +765,7 @@ impl TackyEmitter {
     fn make_temp_var(&mut self, c_type: &Type) -> Value {
         let name = self.make_temp_var_name();
 
-        symbol_table::insert(
+        self.symbol_table.borrow_mut().insert(
             name.clone(),
             SymbolTableEntry {
                 c_type: c_type.clone(),
@@ -787,13 +799,15 @@ impl TackyEmitter {
 mod tests {
     use super::*;
     use crate::ast::typed;
+    use crate::common::symbol_table_generic::SymbolTable;
     use crate::semantic;
     use crate::tacky::ast::UnaryOperator::{Complement, Negate};
 
     fn make_emitter() -> TackyEmitter {
         let label_name_generator = semantic::make_label_name_generator();
         let tmp_var_name_generator = semantic::make_temp_var_name_generator();
-        TackyEmitter::new(label_name_generator, tmp_var_name_generator)
+        let symbol_table = SymbolTable::new_ref();
+        TackyEmitter::new(label_name_generator, tmp_var_name_generator, symbol_table)
     }
 
     #[test]

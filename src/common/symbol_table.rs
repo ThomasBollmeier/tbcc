@@ -1,35 +1,7 @@
-use std::sync::{OnceLock, RwLock};
 use crate::common::Type;
-use crate::common::symbol_table_generic;
 use crate::common::symbol_table_generic::SymbolTable as GenericSymbolTable;
 
 pub type SymbolTable = GenericSymbolTable<SymbolTableEntry>;
-
-static SYMBOL_TABLE: OnceLock<RwLock<SymbolTable>> = OnceLock::new();
-
-pub fn get(name: &str) -> Option<SymbolTableEntry> {
-    with_global_symbol_table(|table| table.get_entry_cloned(name))
-}
-
-pub fn insert(name: impl Into<String>, new_entry: SymbolTableEntry) -> Option<SymbolTableEntry> {
-    with_global_symbol_table_mut(|table| table.insert(name, new_entry))
-}
-
-pub fn clear() {
-    with_global_symbol_table_mut(|table| table.clear());
-}   
-
-pub fn global_symbol_table() -> &'static RwLock<SymbolTable> {
-    SYMBOL_TABLE.get_or_init(|| RwLock::new(SymbolTable::new()))
-}
-
-pub fn with_global_symbol_table<T>(f: impl FnOnce(&SymbolTable) -> T) -> T {
-    symbol_table_generic::with_global_symbol_table(global_symbol_table, f)
-}
-
-pub fn with_global_symbol_table_mut<T>(f: impl FnOnce(&mut SymbolTable) -> T) -> T {
-    symbol_table_generic::with_global_symbol_table_mut(global_symbol_table, f)
-}
 
 #[derive(Debug, Clone)]
 pub struct SymbolTableEntry {
@@ -84,19 +56,5 @@ mod tests {
             }),
             table.get_entry("main").map(|entry| &entry.c_type)
         );
-    }
-
-    #[test]
-    fn global_table_is_singleton() {
-        with_global_symbol_table_mut(|table| {
-            table.clear();
-            table.insert("x", SymbolTableEntry {
-                c_type: Type::Int,
-                attrs: IdentAttrs::Local,
-            });
-        });
-
-        let loaded = with_global_symbol_table(|table| table.get_entry_cloned("x"));
-        assert_eq!(Some(Type::Int), loaded.map(|entry| entry.c_type));
     }
 }

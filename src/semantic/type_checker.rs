@@ -3,21 +3,23 @@ use crate::ast::{
     BinaryOp, Expression, ForInit, FunctionDeclaration, Program, Statement, StorageClass, Type,
     TypedExpression, UnaryOp, VarDeclaration,
 };
-use crate::common::symbol_table;
 use crate::common::symbol_table::{IdentAttrs, InitValue, InitialValue, SymbolTableEntry};
+use crate::common::symbol_table_generic::SymbolTableRef;
 use crate::semantic::visitor::VisitorMut;
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 
 pub struct TypeChecker {
     current_function: Option<FunctionDeclaration>,
     is_for_init_decl: bool,
+    symbol_table: SymbolTableRef<SymbolTableEntry>,
 }
 
 impl TypeChecker {
-    pub fn new() -> Self {
+    pub fn new(symbol_table: SymbolTableRef<SymbolTableEntry>) -> Self {
         Self {
             current_function: None,
             is_for_init_decl: false,
+            symbol_table,
         }
     }
 
@@ -33,7 +35,7 @@ impl TypeChecker {
         let is_func_defined = func_decl.body.is_some();
         let is_global = func_decl.storage_class != Some(StorageClass::Static);
 
-        symbol_table::insert(
+        self.symbol_table.borrow_mut().insert(
             func_decl.name.clone(),
             SymbolTableEntry {
                 c_type: func_decl.func_type.clone(),
@@ -60,7 +62,7 @@ impl TypeChecker {
             let params_and_types = func_decl.parameters.iter().zip(param_types);
 
             for (param, param_type) in params_and_types {
-                symbol_table::insert(
+                self.symbol_table.borrow_mut().insert(
                     param.clone(),
                     SymbolTableEntry {
                         c_type: param_type.clone(),
@@ -103,8 +105,10 @@ impl TypeChecker {
 
         if let Some(body) = &mut func_decl.body {
             // Update the symbol table entry to mark the function as defined
-            symbol_table::with_global_symbol_table_mut(|table| {
-                table.modify(&func_decl.name).and_modify(|entry| {
+            self.symbol_table
+                .borrow_mut()
+                .modify(&func_decl.name)
+                .and_modify(|entry| {
                     if let Type::Function { .. } = &mut entry.c_type {
                         entry.attrs = IdentAttrs::Function {
                             is_defined: true,
@@ -112,12 +116,11 @@ impl TypeChecker {
                         };
                     }
                 });
-            });
 
             let params_and_types = func_decl.parameters.iter().zip(param_types_other.iter());
 
             for (param, param_type) in params_and_types {
-                symbol_table::insert(
+                self.symbol_table.borrow_mut().insert(
                     param.clone(),
                     SymbolTableEntry {
                         c_type: param_type.clone(),
@@ -200,12 +203,14 @@ impl TypeChecker {
 
         let is_global = decl.storage_class != Some(StorageClass::Static);
 
-        match symbol_table::get(&decl.name) {
+        let entry_opt = self.symbol_table.borrow().get_entry_cloned(&decl.name);
+
+        match entry_opt {
             Some(entry) => {
                 self.check_var_decl_file_scope_w_existing(decl, init_value, is_global, entry)
             }
             None => {
-                symbol_table::insert(
+                self.symbol_table.borrow_mut().insert(
                     decl.name.clone(),
                     SymbolTableEntry {
                         c_type: decl.var_type.clone(),
@@ -269,14 +274,15 @@ impl TypeChecker {
                 _ => {}
             }
 
-            symbol_table::with_global_symbol_table_mut(|table| {
-                table.modify(&decl.name).and_modify(|entry| {
+            self.symbol_table
+                .borrow_mut()
+                .modify(&decl.name)
+                .and_modify(|entry| {
                     entry.attrs = IdentAttrs::Static {
                         init_value,
                         is_global,
                     };
                 });
-            });
 
             Ok(())
         } else {
@@ -309,7 +315,9 @@ impl TypeChecker {
             ));
         }
 
-        match symbol_table::get(&decl.name) {
+        let entry_opt = self.symbol_table.borrow().get_entry_cloned(&decl.name);
+
+        match entry_opt {
             Some(entry) => {
                 if entry.c_type != decl.var_type {
                     return Err(anyhow!(
@@ -319,7 +327,7 @@ impl TypeChecker {
                 }
             }
             None => {
-                symbol_table::insert(
+                self.symbol_table.borrow_mut().insert(
                     decl.name.clone(),
                     SymbolTableEntry {
                         c_type: decl.var_type.clone(),
@@ -352,7 +360,7 @@ impl TypeChecker {
             None => Some(InitialValue::Initialized(InitValue::Int(0))),
         };
 
-        symbol_table::insert(
+        self.symbol_table.borrow_mut().insert(
             decl.name.clone(),
             SymbolTableEntry {
                 c_type: decl.var_type.clone(),
@@ -367,11 +375,11 @@ impl TypeChecker {
     }
 
     fn check_var_decl_block_scope_no_storage_class(&self, decl: &mut VarDeclaration) -> Result<()> {
-        if let Some(_) = symbol_table::get(&decl.name) {
+        if let Some(_) = self.symbol_table.borrow().get_entry(&decl.name) {
             return Err(anyhow!("Name '{}' has already been defined", decl.name));
         }
 
-        symbol_table::insert(
+        self.symbol_table.borrow_mut().insert(
             decl.name.clone(),
             SymbolTableEntry {
                 c_type: decl.var_type.clone(),
@@ -554,7 +562,7 @@ impl TypeChecker {
         name: &str,
         args: &[TypedExpression],
     ) -> Result<TypedExpression> {
-        let entry = symbol_table::get(name);
+        let entry = self.symbol_table.borrow().get_entry_cloned(name);
         if entry.is_none() {
             return Err(anyhow!("function '{}' has not been defined", name));
         }
@@ -593,7 +601,7 @@ impl TypeChecker {
     }
 
     fn set_type_var(&self, name: &str, typed_expr: &TypedExpression) -> Result<TypedExpression> {
-        match symbol_table::get(name) {
+        match self.symbol_table.borrow().get_entry(name) {
             Some(entry) => match entry.c_type {
                 Type::Function { .. } => Err(anyhow!(
                     "Identifier '{}' is a function, but used as a variable",
@@ -679,7 +687,9 @@ impl VisitorMut for TypeChecker {
             self.current_function = Some(func_decl.clone());
         }
 
-        match symbol_table::get(&func_decl.name) {
+        let entry_opt = self.symbol_table.borrow().get_entry_cloned(&func_decl.name);
+
+        match entry_opt {
             Some(SymbolTableEntry {
                 c_type:
                     Type::Function {
@@ -801,11 +811,13 @@ impl VisitorMut for TypeChecker {
                 for (_, typed_expr) in arms {
                     if let Some(typed_expr) = typed_expr {
                         let case_expr = self.set_type(typed_expr)?;
-                        let common_type = Self::get_common_type(&case_expr.get_type(), &condition_type);
+                        let common_type =
+                            Self::get_common_type(&case_expr.get_type(), &condition_type);
                         if common_type == Type::Undefined {
                             return Err(anyhow!(
                                 "Case expression type is incompatible with switch condition type"
-                            ));                        }
+                            ));
+                        }
                         *typed_expr = Self::convert_to(&case_expr, &common_type);
                         if condition_type != common_type {
                             condition_type = common_type.clone();
@@ -830,12 +842,13 @@ impl VisitorMut for TypeChecker {
 #[cfg(test)]
 mod tests {
     use crate::ast::Program;
+    use crate::common::symbol_table;
     use crate::lexer::Lexer;
     use crate::parser::Parser;
     use crate::semantic::type_checker::TypeChecker;
-    use crate::semantic::{make_var_name_generator, IdentifierResolver};
+    use crate::semantic::{IdentifierResolver, make_var_name_generator};
     use anyhow::Result;
-    use crate::common::symbol_table;
+    use crate::common::symbol_table_generic::{SymbolTable, SymbolTableRef};
 
     #[test]
     fn check_ok() {
@@ -924,13 +937,13 @@ mod tests {
         let tokens = lexer.scan_tokens(code)?;
         let mut program = parser.parse(tokens)?;
 
-        symbol_table::clear();
+        let symbol_table: SymbolTableRef<symbol_table::SymbolTableEntry> = SymbolTable::new_ref();
 
         let var_name_generator = make_var_name_generator();
         let mut resolver = IdentifierResolver::new(var_name_generator);
         resolver.resolve(&mut program)?;
 
-        let mut type_checker = TypeChecker::new();
+        let mut type_checker = TypeChecker::new(symbol_table);
         type_checker.check(&mut program)?;
 
         Ok(program)
