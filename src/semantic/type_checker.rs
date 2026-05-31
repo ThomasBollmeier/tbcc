@@ -558,7 +558,7 @@ impl TypeChecker {
     }
 
     fn set_type_function_call(
-        &self,
+        &mut self,
         name: &str,
         args: &[TypedExpression],
     ) -> Result<TypedExpression> {
@@ -585,7 +585,8 @@ impl TypeChecker {
             let mut converted_args = Vec::new();
 
             for (arg, param_type) in args.iter().zip(param_types.iter()) {
-                converted_args.push(Self::convert_to(arg, param_type));
+                let arg = self.set_type(arg)?;
+                converted_args.push(Self::convert_to(&arg, param_type));
             }
 
             Ok(TypedExpression::with_type(

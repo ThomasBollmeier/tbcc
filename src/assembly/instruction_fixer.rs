@@ -3,7 +3,7 @@ use crate::assembly::ast::AssemblyType::{Longword, Quadword};
 use crate::assembly::ast::Instruction::{Mov, MovSx};
 use crate::assembly::ast::Operand::Register;
 use crate::assembly::ast::Register::{R10, R11};
-use crate::assembly::ast::{Instruction, Operand, VisitorMut};
+use crate::assembly::ast::{AssemblyType, BinaryOp, ImmValue, Instruction, Operand, VisitorMut};
 
 pub struct InstructionFixer;
 
@@ -27,14 +27,30 @@ impl InstructionFixer {
     fn handle_mov(
         &self,
         instruction: &Instruction,
-        assembly_type: &crate::assembly::ast::AssemblyType,
+        assembly_type: &AssemblyType,
         src: &Operand,
         dst: &Operand,
         new_instructions: &mut Vec<Instruction>,
     ) {
         use crate::assembly::ast::{Instruction::Mov, Operand::Register, Register::R10};
 
-        if Self::all_memory(&[src, dst]) {
+        let src_is_long = if let Operand::Immediate(ImmValue::Long(_)) = src {
+            true
+        } else {
+            false
+        };
+
+        if Self::all_memory(&[src, dst]) || src_is_long {
+            let src = if *assembly_type == Longword && src_is_long {
+                match src {
+                    Operand::Immediate(ImmValue::Long(l)) => {
+                        Operand::Immediate(ImmValue::Int(*l as i32))
+                    },
+                    _ => unreachable!()
+                }
+            } else {
+                src.clone()
+            };
             new_instructions.push(Mov {
                 assembly_type: assembly_type.clone(),
                 src: src.clone(),
@@ -96,8 +112,8 @@ impl InstructionFixer {
     fn handle_binary(
         &self,
         instruction: &Instruction,
-        assembly_type: &crate::assembly::ast::AssemblyType,
-        op: &crate::assembly::ast::BinaryOp,
+        assembly_type: &AssemblyType,
+        op: &BinaryOp,
         left: &Operand,
         right: &Operand,
         new_instructions: &mut Vec<Instruction>,
@@ -107,6 +123,13 @@ impl InstructionFixer {
             Instruction::{Binary, Mov},
             Operand::Register,
             Register::{CX, R10, R11},
+        };
+
+        let left = match op {
+            Add | Sub | Mul => {
+                &Self::replace_long_src_operand(assembly_type, left, new_instructions)
+            }
+            _ => left,
         };
 
         match op {
@@ -169,10 +192,28 @@ impl InstructionFixer {
         }
     }
 
+    fn replace_long_src_operand(
+        assembly_type: &AssemblyType,
+        left: &Operand,
+        instructions: &mut Vec<Instruction>,
+    ) -> Operand {
+        use crate::assembly::ast::{Instruction::Mov, Operand::Register, Register::R10};
+        if let Operand::Immediate(ImmValue::Long(_)) = left {
+            instructions.push(Mov {
+                assembly_type: assembly_type.clone(),
+                src: left.clone(),
+                dst: Register(R10),
+            });
+            Register(R10)
+        } else {
+            left.clone()
+        }
+    }
+
     fn handle_idiv(
         &self,
         instruction: &Instruction,
-        assembly_type: &crate::assembly::ast::AssemblyType,
+        assembly_type: &AssemblyType,
         operand: &Operand,
         new_instructions: &mut Vec<Instruction>,
     ) {
@@ -200,7 +241,7 @@ impl InstructionFixer {
     fn handle_cmp(
         &self,
         instruction: &Instruction,
-        assembly_type: &crate::assembly::ast::AssemblyType,
+        assembly_type: &AssemblyType,
         op1: &Operand,
         op2: &Operand,
         new_instructions: &mut Vec<Instruction>,
@@ -212,6 +253,8 @@ impl InstructionFixer {
             Operand::Register,
             Register::{R10, R11},
         };
+
+        let op1 = &Self::replace_long_src_operand(assembly_type, op1, new_instructions);
 
         match (op1, op2) {
             (_, Immediate(_)) => {
@@ -307,7 +350,9 @@ mod tests {
     use super::InstructionFixer;
     use crate::assembly::assembly_creator::AssemblyCreator;
     use crate::assembly::ast::TopLevel::Function;
-    use crate::assembly::ast::{AssemblyType, FuncDef, ImmValue, Instruction, Operand, Program, Register, UnaryOp};
+    use crate::assembly::ast::{
+        AssemblyType, FuncDef, ImmValue, Instruction, Operand, Program, Register, UnaryOp,
+    };
     use crate::assembly::pseudo_reg_replacer::PseudoRegReplacer;
     use crate::common::symbol_table_generic::SymbolTable;
 

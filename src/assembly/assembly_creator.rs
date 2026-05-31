@@ -4,6 +4,7 @@ use crate::assembly::ast::{AssemblyType, ImmValue, StaticVar, TopLevel as TopLev
 use crate::assembly::ast::{
     ConditionCode, FuncDef, Instruction, Operand, Program, Register, UnaryOp,
 };
+use crate::assembly::ast::AssemblyType::Longword;
 use crate::assembly::symbol_table::SymbolTableEntry as AsmSymbolTableEntry;
 use crate::common::symbol_table::SymbolTableEntry;
 use crate::common::symbol_table_generic::{SymbolTable, SymbolTableRef};
@@ -130,6 +131,12 @@ impl AssemblyCreator {
         for instruction in instructions {
             match instruction {
                 TackyInstruction::Return(value) => self.push_return(&mut ret, value),
+                TackyInstruction::SignExtend { src, dst } => {
+                    self.push_sign_extend(&mut ret, src, dst);
+                }
+                TackyInstruction::Truncate { src, dst } => {
+                    self.push_truncate(&mut ret, src, dst);
+                }
                 TackyInstruction::Unary {
                     op: UnaryOperator::Not,
                     src,
@@ -168,7 +175,6 @@ impl AssemblyCreator {
                     arguments,
                     dst,
                 } => self.push_function_call(&mut ret, name, arguments, dst),
-                _ => return Err(anyhow::anyhow!("Not a valid instruction.")),
             }
         }
 
@@ -269,6 +275,25 @@ impl AssemblyCreator {
             dst: Operand::Register(Register::AX),
         });
         instructions.push(Ret);
+    }
+
+    fn push_sign_extend(&mut self, instructions: &mut Vec<Instruction>, src: &Value, dst: &Value) {
+        let src_op = self.create_operand(src);
+        let dst_op = self.create_operand(dst);
+        instructions.push(Instruction::MovSx {
+            src: src_op,
+            dst: dst_op,
+        });
+    }
+
+    fn push_truncate(&mut self, instructions: &mut Vec<Instruction>, src: &Value, dst: &Value) {
+        let src_op = self.create_operand(src);
+        let dst_op = self.create_operand(dst);
+        instructions.push(Instruction::Mov {
+            assembly_type: Longword,
+            src: src_op,
+            dst: dst_op,
+        });
     }
 
     fn push_unary_not(&mut self, instructions: &mut Vec<Instruction>, src: &Value, dst: &Value) {
@@ -559,7 +584,7 @@ impl AssemblyCreator {
     fn map_type_to_asm_type(c_type: &Type) -> AssemblyType {
         use crate::common::Type::*;
         match c_type {
-            Int => AssemblyType::Longword,
+            Int => Longword,
             Long => AssemblyType::Quadword,
             _ => unimplemented!("unsupported type {:?}", c_type),
         }
@@ -574,7 +599,7 @@ impl AssemblyCreator {
 
     fn get_asm_type(&self, value: &Value) -> AssemblyType {
         match value {
-            Value::IntegerConstant(_) => AssemblyType::Longword,
+            Value::IntegerConstant(_) => Longword,
             Value::LongConstant(_) => AssemblyType::Quadword,
             Value::Variable(name) => self.lookup_asm_type(name),
         }
@@ -582,7 +607,7 @@ impl AssemblyCreator {
 
     pub fn allocate_stack(bytes: i32) -> Instruction {
         Instruction::Binary {
-            assembly_type: AssemblyType::Longword,
+            assembly_type: Longword,
             op: crate::assembly::ast::BinaryOp::Sub,
             left: Operand::Immediate(ImmValue::Int(bytes)),
             right: Operand::Register(Register::SP),
@@ -591,7 +616,7 @@ impl AssemblyCreator {
 
     pub fn deallocate_stack(bytes: i32) -> Instruction {
         Instruction::Binary {
-            assembly_type: AssemblyType::Longword,
+            assembly_type: Longword,
             op: crate::assembly::ast::BinaryOp::Add,
             left: Operand::Immediate(ImmValue::Int(bytes)),
             right: Operand::Register(Register::SP),
@@ -639,10 +664,7 @@ mod tests {
         semantic::validate(var_name_gen, label_name_gen, symbol_table, program)
     }
 
-    #[test]
-    fn creates_asm_program_ok() {
-        let code = "int main(void) { return 42 >> 1; }";
-
+    fn run_code(code: &str) {
         let lexer = Lexer::new();
         let tokens = lexer.scan_tokens(code).expect("Failed to scan tokens");
 
@@ -660,7 +682,9 @@ mod tests {
             symbol_table.clone(),
             &mut program,
         )
-        .expect("Failed to validate program");
+            .expect("Failed to validate program");
+
+        dbg!(&program);
 
         let mut tacky_emitter =
             make_emitter(&label_name_gen, &tmp_var_name_gen, symbol_table.clone());
@@ -674,6 +698,72 @@ mod tests {
             .expect("Failed to create assembly program");
 
         dbg!(&assembly_program);
+    }
+
+    #[test]
+    fn creates_asm_program_ok() {
+        let code = "int main(void) { return 42 >> 1; }";
+
+        run_code(code);
+    }
+
+    #[test]
+    fn creates_asm_program_2_ok() {
+        let code = r#"
+        int return_truncated_long(long l) {
+            return l;
+        }
+
+        long return_extended_int(int i) {
+            return i;
+        }
+
+        int truncate_on_assignment(long l, int expected) {
+            int result = l; // implicit conversion truncates l
+            return result == expected;
+        }
+
+        int main(void) {
+
+            // return statements
+
+            /* return_truncated_long will truncate 2^32 + 2 to 2
+             * assigning it to result converts this to a long
+             * but preserves its value.
+             */
+            long result = return_truncated_long(4294967298l);
+            if (result != 2l) {
+                return 1;
+            }
+
+            /* return_extended_int sign-extends its argument, preserving its value */
+            result = return_extended_int(-10);
+            if (result != -10) {
+                return 2;
+            }
+
+            // initializer
+
+            /* This is 2^32 + 2,
+             * it will be truncated to 2 by assignment
+             */
+            int i = 4294967298l;
+            if (i != 2) {
+                return 3;
+            }
+
+            // assignment expression
+
+            // 2^34 will be truncated to 0 when assigned to an int
+            if (!truncate_on_assignment(17179869184l, 0)) {
+                return 4;
+            }
+
+            return 0;
+        }
+        "#;
+
+        run_code(code);
     }
 
     #[test]
@@ -747,7 +837,7 @@ mod tests {
         assert!(matches!(
             &instructions[0],
             AsmInstruction::Mov {
-                assembly_type: AssemblyType::Longword,
+                assembly_type: Longword,
                 src: AsmOperand::Immediate(ImmValue::Int(1)),
                 dst: AsmOperand::PseudoReg(name)
             } if name == "tmp.0"
@@ -755,7 +845,7 @@ mod tests {
         assert!(matches!(
             &instructions[1],
             AsmInstruction::Binary {
-                assembly_type: AssemblyType::Longword,
+                assembly_type: Longword,
                 op: AsmBinaryOp::Add,
                 left: AsmOperand::Immediate(ImmValue::Int(2)),
                 right: AsmOperand::PseudoReg(name)
@@ -765,7 +855,7 @@ mod tests {
         assert!(matches!(
             &instructions[2],
             AsmInstruction::Mov {
-                assembly_type: AssemblyType::Longword,
+                assembly_type: Longword,
                 src: AsmOperand::PseudoReg(src),
                 dst: AsmOperand::PseudoReg(dst)
             } if src == "tmp.0" && dst == "tmp.1"
@@ -773,7 +863,7 @@ mod tests {
         assert!(matches!(
             &instructions[3],
             AsmInstruction::Binary {
-                assembly_type: AssemblyType::Longword,
+                assembly_type: Longword,
                 op: AsmBinaryOp::Sub,
                 left: AsmOperand::Immediate(ImmValue::Int(3)),
                 right: AsmOperand::PseudoReg(name),
@@ -783,7 +873,7 @@ mod tests {
         assert!(matches!(
             &instructions[4],
             AsmInstruction::Mov {
-                assembly_type: AssemblyType::Longword,
+                assembly_type: Longword,
                 src: AsmOperand::PseudoReg(src),
                 dst: AsmOperand::PseudoReg(dst)
             } if src == "tmp.1" && dst == "tmp.2"
@@ -791,7 +881,7 @@ mod tests {
         assert!(matches!(
             &instructions[5],
             AsmInstruction::Binary {
-                assembly_type: AssemblyType::Longword,
+                assembly_type: Longword,
                 op: AsmBinaryOp::Mul,
                 left: AsmOperand::Immediate(ImmValue::Int(4)),
                 right: AsmOperand::PseudoReg(name)
@@ -801,26 +891,26 @@ mod tests {
         assert!(matches!(
             &instructions[6],
             AsmInstruction::Mov {
-                assembly_type: AssemblyType::Longword,
+                assembly_type: Longword,
                 src: AsmOperand::PseudoReg(name),
                 dst: AsmOperand::Register(AsmRegister::AX)
             } if name == "tmp.2"
         ));
         assert!(matches!(
             &instructions[7],
-            AsmInstruction::Cdq(AssemblyType::Longword)
+            AsmInstruction::Cdq(Longword)
         ));
         assert!(matches!(
             &instructions[8],
             AsmInstruction::Idiv {
-                assembly_type: AssemblyType::Longword,
+                assembly_type: Longword,
                 operand: AsmOperand::Immediate(ImmValue::Int(5)),
             },
         ));
         assert!(matches!(
             &instructions[9],
             AsmInstruction::Mov {
-                assembly_type: AssemblyType::Longword,
+                assembly_type: Longword,
                 src: AsmOperand::Register(AsmRegister::AX),
                 dst: AsmOperand::PseudoReg(name)
             } if name == "tmp.3"
@@ -829,26 +919,26 @@ mod tests {
         assert!(matches!(
             &instructions[10],
             AsmInstruction::Mov {
-                assembly_type: AssemblyType::Longword,
+                assembly_type: Longword,
                 src: AsmOperand::PseudoReg(name),
                 dst: AsmOperand::Register(AsmRegister::AX)
             } if name == "tmp.3"
         ));
         assert!(matches!(
             &instructions[11],
-            AsmInstruction::Cdq(AssemblyType::Longword)
+            AsmInstruction::Cdq(Longword)
         ));
         assert!(matches!(
             &instructions[12],
             AsmInstruction::Idiv {
-                assembly_type: AssemblyType::Longword,
+                assembly_type: Longword,
                 operand: AsmOperand::Immediate(ImmValue::Int(2)),
             },
         ));
         assert!(matches!(
             &instructions[13],
             AsmInstruction::Mov {
-                assembly_type: AssemblyType::Longword,
+                assembly_type: Longword,
                 src: AsmOperand::Register(DX),
                 dst: AsmOperand::PseudoReg(name)
             } if name == "tmp.4"
@@ -857,7 +947,7 @@ mod tests {
         assert!(matches!(
             &instructions[14],
             AsmInstruction::Mov {
-                assembly_type: AssemblyType::Longword,
+                assembly_type: Longword,
                 src: AsmOperand::PseudoReg(name),
                 dst: AsmOperand::Register(AsmRegister::AX)
             } if name == "tmp.4"
