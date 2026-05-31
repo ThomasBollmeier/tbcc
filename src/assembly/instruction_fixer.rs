@@ -1,5 +1,9 @@
 use crate::assembly::assembly_creator::AssemblyCreator;
-use crate::assembly::ast::{Operand, VisitorMut};
+use crate::assembly::ast::AssemblyType::{Longword, Quadword};
+use crate::assembly::ast::Instruction::{Mov, MovSx};
+use crate::assembly::ast::Operand::Register;
+use crate::assembly::ast::Register::{R10, R11};
+use crate::assembly::ast::{Instruction, Operand, VisitorMut};
 
 pub struct InstructionFixer;
 
@@ -19,137 +23,277 @@ impl InstructionFixer {
     fn all_memory(operands: &[&Operand]) -> bool {
         operands.iter().all(|op| Self::is_memory(*op))
     }
+
+    fn handle_mov(
+        &self,
+        instruction: &Instruction,
+        assembly_type: &crate::assembly::ast::AssemblyType,
+        src: &Operand,
+        dst: &Operand,
+        new_instructions: &mut Vec<Instruction>,
+    ) {
+        use crate::assembly::ast::{Instruction::Mov, Operand::Register, Register::R10};
+
+        if Self::all_memory(&[src, dst]) {
+            new_instructions.push(Mov {
+                assembly_type: assembly_type.clone(),
+                src: src.clone(),
+                dst: Register(R10),
+            });
+            new_instructions.push(Mov {
+                assembly_type: assembly_type.clone(),
+                src: Register(R10),
+                dst: dst.clone(),
+            });
+        } else {
+            new_instructions.push(instruction.clone());
+        }
+    }
+    fn handle_movsx(
+        &self,
+        instruction: &Instruction,
+        src: &Operand,
+        dst: &Operand,
+        new_instructions: &mut Vec<Instruction>,
+    ) {
+        if let Operand::Immediate(_) = src {
+            new_instructions.push(Mov {
+                assembly_type: Longword,
+                src: src.clone(),
+                dst: Register(R10),
+            });
+            if Self::is_memory(dst) {
+                new_instructions.push(MovSx {
+                    src: Register(R10),
+                    dst: Register(R11),
+                });
+                new_instructions.push(Mov {
+                    assembly_type: Quadword,
+                    src: Register(R11),
+                    dst: dst.clone(),
+                });
+            } else {
+                new_instructions.push(MovSx {
+                    src: Register(R10),
+                    dst: dst.clone(),
+                });
+            }
+        } else if Self::is_memory(dst) {
+            new_instructions.push(MovSx {
+                src: src.clone(),
+                dst: Register(R10),
+            });
+            new_instructions.push(Mov {
+                assembly_type: Quadword,
+                src: Register(R10),
+                dst: dst.clone(),
+            })
+        } else {
+            new_instructions.push(instruction.clone());
+        }
+    }
+
+    fn handle_binary(
+        &self,
+        instruction: &Instruction,
+        assembly_type: &crate::assembly::ast::AssemblyType,
+        op: &crate::assembly::ast::BinaryOp,
+        left: &Operand,
+        right: &Operand,
+        new_instructions: &mut Vec<Instruction>,
+    ) {
+        use crate::assembly::ast::{
+            BinaryOp::{Add, BitAnd, BitOr, BitXor, Mul, ShiftLeft, ShiftRight, Sub},
+            Instruction::{Binary, Mov},
+            Operand::Register,
+            Register::{CX, R10, R11},
+        };
+
+        match op {
+            Mul => {
+                if Self::is_memory(right) {
+                    new_instructions.push(Mov {
+                        assembly_type: assembly_type.clone(),
+                        src: right.clone(),
+                        dst: Register(R11),
+                    });
+                    new_instructions.push(Binary {
+                        assembly_type: assembly_type.clone(),
+                        op: Mul,
+                        left: left.clone(),
+                        right: Register(R11),
+                    });
+                    new_instructions.push(Mov {
+                        assembly_type: assembly_type.clone(),
+                        src: Register(R11),
+                        dst: right.clone(),
+                    });
+                } else {
+                    new_instructions.push(instruction.clone());
+                }
+            }
+            ShiftLeft | ShiftRight => {
+                if Self::is_memory(left) {
+                    new_instructions.push(Mov {
+                        assembly_type: assembly_type.clone(),
+                        src: left.clone(),
+                        dst: Register(CX),
+                    });
+                    new_instructions.push(Binary {
+                        assembly_type: assembly_type.clone(),
+                        op: op.clone(),
+                        left: Register(CX),
+                        right: right.clone(),
+                    });
+                } else {
+                    new_instructions.push(instruction.clone());
+                }
+            }
+            Add | Sub | BitAnd | BitOr | BitXor => {
+                if Self::all_memory(&[left, right]) {
+                    new_instructions.push(Mov {
+                        assembly_type: assembly_type.clone(),
+                        src: left.clone(),
+                        dst: Register(R10),
+                    });
+                    new_instructions.push(Binary {
+                        assembly_type: assembly_type.clone(),
+                        op: op.clone(),
+                        left: Register(R10),
+                        right: right.clone(),
+                    });
+                } else {
+                    new_instructions.push(instruction.clone());
+                }
+            }
+        }
+    }
+
+    fn handle_idiv(
+        &self,
+        instruction: &Instruction,
+        assembly_type: &crate::assembly::ast::AssemblyType,
+        operand: &Operand,
+        new_instructions: &mut Vec<Instruction>,
+    ) {
+        use crate::assembly::ast::{
+            Instruction::Idiv, Instruction::Mov, Operand::Immediate, Operand::Register,
+            Register::R10,
+        };
+
+        match operand {
+            Immediate(_) => {
+                new_instructions.push(Mov {
+                    assembly_type: assembly_type.clone(),
+                    src: operand.clone(),
+                    dst: Register(R10),
+                });
+                new_instructions.push(Idiv {
+                    assembly_type: assembly_type.clone(),
+                    operand: Register(R10),
+                });
+            }
+            _ => new_instructions.push(instruction.clone()),
+        }
+    }
+
+    fn handle_cmp(
+        &self,
+        instruction: &Instruction,
+        assembly_type: &crate::assembly::ast::AssemblyType,
+        op1: &Operand,
+        op2: &Operand,
+        new_instructions: &mut Vec<Instruction>,
+    ) {
+        use crate::assembly::ast::{
+            Instruction::Cmp,
+            Instruction::Mov,
+            Operand::Immediate,
+            Operand::Register,
+            Register::{R10, R11},
+        };
+
+        match (op1, op2) {
+            (_, Immediate(_)) => {
+                new_instructions.push(Mov {
+                    assembly_type: assembly_type.clone(),
+                    src: op2.clone(),
+                    dst: Register(R11),
+                });
+                new_instructions.push(Cmp {
+                    assembly_type: assembly_type.clone(),
+                    op1: op1.clone(),
+                    op2: Register(R11),
+                });
+            }
+            _ => {
+                if Self::all_memory(&[op1, op2]) {
+                    new_instructions.push(Mov {
+                        assembly_type: assembly_type.clone(),
+                        src: op1.clone(),
+                        dst: Register(R10),
+                    });
+                    new_instructions.push(Cmp {
+                        assembly_type: assembly_type.clone(),
+                        op1: Register(R10),
+                        op2: op2.clone(),
+                    });
+                } else {
+                    new_instructions.push(instruction.clone());
+                }
+            }
+        }
+    }
 }
 
 impl VisitorMut for InstructionFixer {
     fn enter_func_def(&mut self, func_def: &mut crate::assembly::ast::FuncDef) {
-        use crate::assembly::ast::{BinaryOp::*, Instruction::*, Operand::*, Register::*};
+        use crate::assembly::ast::Instruction::*;
 
         let mut new_instructions = vec![];
 
         // Allocate stack space at the beginning of the function
-        new_instructions.push(AssemblyCreator::allocate_stack(func_def.stack_frame_size as i32));
+        new_instructions.push(AssemblyCreator::allocate_stack(
+            func_def.stack_frame_size as i32,
+        ));
 
         for instruction in &func_def.instructions {
             match instruction {
-                Mov { assembly_type, src, dst, .. } => {
-                    if Self::all_memory(&[src, dst]) {
-                        new_instructions.push(Mov {
-                            assembly_type: assembly_type.clone(),
-                            src: src.clone(),
-                            dst: Register(R10),
-                        });
-                        new_instructions.push(Mov {
-                            assembly_type: assembly_type.clone(),
-                            src: Register(R10),
-                            dst: dst.clone(),
-                        });
-                    } else {
-                        new_instructions.push(instruction.clone())
-                    }
+                Mov {
+                    assembly_type,
+                    src,
+                    dst,
+                    ..
+                } => {
+                    self.handle_mov(instruction, assembly_type, src, dst, &mut new_instructions);
                 }
-                Binary { assembly_type, op, left, right } => match op {
-                    Mul => {
-                        if Self::is_memory(right) {
-                            new_instructions.push(Mov {
-                                assembly_type: assembly_type.clone(),
-                                src: right.clone(),
-                                dst: Register(R11),
-                            });
-                            new_instructions.push(Binary {
-                                assembly_type: assembly_type.clone(),
-                                op: Mul,
-                                left: left.clone(),
-                                right: Register(R11),
-                            });
-                            new_instructions.push(Mov {
-                                assembly_type: assembly_type.clone(),
-                                src: Register(R11),
-                                dst: right.clone(),
-                            });
-                        } else {
-                            new_instructions.push(instruction.clone());
-                        }
-                    }
-                    ShiftLeft | ShiftRight => {
-                        if Self::is_memory(left) {
-                            new_instructions.push(Mov {
-                                assembly_type: assembly_type.clone(),
-                                src: left.clone(),
-                                dst: Register(CX),
-                            });
-                            new_instructions.push(Binary {
-                                assembly_type: assembly_type.clone(),
-                                op: op.clone(),
-                                left: Register(CX),
-                                right: right.clone(),
-                            });
-                        } else {
-                            new_instructions.push(instruction.clone());
-                        }
-                    }
-                    Add | Sub | BitAnd | BitOr | BitXor => {
-                        if Self::all_memory(&[left, right]) {
-                            new_instructions.push(Mov {
-                                assembly_type: assembly_type.clone(),
-                                src: left.clone(),
-                                dst: Register(R10),
-                            });
-                            new_instructions.push(Binary {
-                                assembly_type: assembly_type.clone(),
-                                op: op.clone(),
-                                left: Register(R10),
-                                right: right.clone(),
-                            });
-                        } else {
-                            new_instructions.push(instruction.clone());
-                        }
-                    }
-                },
-                Idiv { assembly_type, operand: op} => match op {
-                    Immediate(_) => {
-                        new_instructions.push(Mov {
-                            assembly_type: assembly_type.clone(),
-                            src: op.clone(),
-                            dst: Register(R10),
-                        });
-                        new_instructions.push(Idiv {
-                            assembly_type: assembly_type.clone(),
-                            operand: Register(R10)
-                        });
-                    }
-                    _ => new_instructions.push(instruction.clone()),
-                },
-                Cmp { assembly_type, op1, op2 } => match (op1, op2) {
-                    (_, Immediate(_)) => {
-                        new_instructions.push(Mov {
-                            assembly_type: assembly_type.clone(),
-                            src: op2.clone(),
-                            dst: Register(R11),
-                        });
-                        new_instructions.push(Cmp {
-                            assembly_type: assembly_type.clone(),
-                            op1: op1.clone(),
-                            op2: Register(R11),
-                        });
-                    }
-                    _ => {
-                        if Self::all_memory(&[op1, op2]) {
-                            new_instructions.push(Mov {
-                                assembly_type: assembly_type.clone(),
-                                src: op1.clone(),
-                                dst: Register(R10),
-                            });
-                            new_instructions.push(Cmp {
-                                assembly_type: assembly_type.clone(),
-                                op1: Register(R10),
-                                op2: op2.clone(),
-                            });
-                        } else {
-                            new_instructions.push(instruction.clone());
-                        }
-                    }
-                },
+                MovSx { src, dst } => {
+                    self.handle_movsx(instruction, src, dst, &mut new_instructions);
+                }
+                Binary {
+                    assembly_type,
+                    op,
+                    left,
+                    right,
+                } => self.handle_binary(
+                    instruction,
+                    assembly_type,
+                    op,
+                    left,
+                    right,
+                    &mut new_instructions,
+                ),
+                Idiv {
+                    assembly_type,
+                    operand,
+                } => {
+                    self.handle_idiv(instruction, assembly_type, operand, &mut new_instructions);
+                }
+                Cmp {
+                    assembly_type,
+                    op1,
+                    op2,
+                } => self.handle_cmp(instruction, assembly_type, op1, op2, &mut new_instructions),
                 _ => new_instructions.push(instruction.clone()),
             }
         }
@@ -160,10 +304,10 @@ impl VisitorMut for InstructionFixer {
 
 #[cfg(test)]
 mod tests {
-    use crate::assembly::assembly_creator::AssemblyCreator;
     use super::InstructionFixer;
+    use crate::assembly::assembly_creator::AssemblyCreator;
     use crate::assembly::ast::TopLevel::Function;
-    use crate::assembly::ast::{AssemblyType, FuncDef, Instruction, Operand, Program, Register, UnaryOp};
+    use crate::assembly::ast::{AssemblyType, FuncDef, ImmValue, Instruction, Operand, Program, Register, UnaryOp};
     use crate::assembly::pseudo_reg_replacer::PseudoRegReplacer;
     use crate::common::symbol_table_generic::SymbolTable;
 
@@ -228,7 +372,7 @@ mod tests {
         let instructions = vec![
             Instruction::Mov {
                 assembly_type: AssemblyType::Longword,
-                src: Operand::Immediate(1),
+                src: Operand::Immediate(ImmValue::Int(1)),
                 dst: Operand::Register(Register::AX),
             },
             Instruction::Unary {
@@ -246,7 +390,7 @@ mod tests {
 
         match &fixed[1] {
             Instruction::Mov { src, dst, .. } => {
-                assert_eq!(*src, Operand::Immediate(1));
+                assert_eq!(*src, Operand::Immediate(ImmValue::Int(1)));
                 assert_eq!(*dst, Operand::Register(Register::AX));
             }
             _ => panic!("expected mov"),

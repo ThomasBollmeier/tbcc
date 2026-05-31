@@ -1,3 +1,4 @@
+use std::fmt::Display;
 use crate::common::InitValue;
 
 #[derive(Debug)]
@@ -161,11 +162,26 @@ pub enum ConditionCode {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Operand {
-    Immediate(i32),
+    Immediate(ImmValue),
     Register(Register),
     PseudoReg(String),
     Data(String),
     Stack(i32),
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum ImmValue {
+    Int(i32),
+    Long(i64),
+}
+
+impl Display for ImmValue {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ImmValue::Int(i) => write!(f, "{}", i),
+            ImmValue::Long(i) => write!(f, "{}", i),
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]

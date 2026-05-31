@@ -1,10 +1,10 @@
 use crate::assembly::ast::{
-    BinaryOp, ConditionCode, FuncDef, Instruction, Operand, Program, Register, StaticVar, UnaryOp,
-    Visitor,
+    BinaryOp, ConditionCode, FuncDef, Instruction, Operand, Program, Register, StaticVar,
+    UnaryOp, Visitor,
 };
 use crate::assembly::symbol_table::SymbolTableEntry;
-use crate::common::InitValue;
 use crate::common::symbol_table_generic::SymbolTableRef;
+use crate::common::InitValue;
 
 pub struct CodeGenerator {
     code: String,
@@ -38,7 +38,7 @@ impl CodeGenerator {
 
     fn operand_8byte_to_string(&mut self, operand: &Operand) -> String {
         match operand {
-            Operand::Immediate(imm) => format!("${}", imm),
+            Operand::Immediate(imm) => format!("{}", imm),
             Operand::Register(Register::AX) => "%rax".to_string(),
             Operand::Register(Register::CX) => "%rcx".to_string(),
             Operand::Register(Register::DX) => "%rdx".to_string(),

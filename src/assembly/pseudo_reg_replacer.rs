@@ -150,9 +150,7 @@ impl VisitorMut for PseudoRegReplacer {
 mod tests {
     use super::PseudoRegReplacer;
     use crate::assembly::ast::TopLevel::Function;
-    use crate::assembly::ast::{
-        AssemblyType, FuncDef, Instruction, Operand, Program, Register, UnaryOp,
-    };
+    use crate::assembly::ast::{AssemblyType, FuncDef, ImmValue, Instruction, Operand, Program, Register, UnaryOp};
     use crate::assembly::symbol_table::SymbolTableEntry;
     use crate::common::symbol_table_generic::{SymbolTable, SymbolTableRef};
 
@@ -271,7 +269,7 @@ mod tests {
         let instructions = vec![
             Instruction::Mov {
                 assembly_type: AssemblyType::Longword,
-                src: Operand::Immediate(7),
+                src: Operand::Immediate(ImmValue::Int(7)),
                 dst: Operand::Register(Register::AX),
             },
             Instruction::Ret,
@@ -281,7 +279,7 @@ mod tests {
 
         match &instructions[0] {
             Instruction::Mov { src, dst, .. } => {
-                assert!(matches!(src, Operand::Immediate(7)));
+                assert!(matches!(src, Operand::Immediate(ImmValue::Int(7))));
                 assert!(matches!(dst, Operand::Register(Register::AX)));
             }
             _ => panic!("expected mov instruction"),

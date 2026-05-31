@@ -1,7 +1,4 @@
 use crate::common::Type;
-use crate::common::symbol_table_generic::SymbolTable as GenericSymbolTable;
-
-pub type SymbolTable = GenericSymbolTable<SymbolTableEntry>;
 
 #[derive(Debug, Clone)]
 pub struct SymbolTableEntry {
@@ -36,6 +33,7 @@ pub enum InitValue {
 
 #[cfg(test)]
 mod tests {
+    use crate::common::symbol_table_generic::SymbolTable;
     use super::*;
 
     #[test]

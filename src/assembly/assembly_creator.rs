@@ -1,6 +1,6 @@
 use crate::assembly::ast::Operand::Stack;
 use crate::assembly::ast::Register::{CX, DI, DX, R8, R9, SI};
-use crate::assembly::ast::{AssemblyType, StaticVar, TopLevel as TopLevelAsm};
+use crate::assembly::ast::{AssemblyType, ImmValue, StaticVar, TopLevel as TopLevelAsm};
 use crate::assembly::ast::{
     ConditionCode, FuncDef, Instruction, Operand, Program, Register, UnaryOp,
 };
@@ -278,12 +278,12 @@ impl AssemblyCreator {
         let dst_op = self.create_operand(dst);
         instructions.push(Cmp {
             assembly_type: self.get_asm_type(src),
-            op1: Operand::Immediate(0),
+            op1: Operand::Immediate(ImmValue::Int(0)),
             op2: src_op,
         });
         instructions.push(Mov {
             assembly_type: self.get_asm_type(dst),
-            src: Operand::Immediate(0),
+            src: Operand::Immediate(ImmValue::Int(0)),
             dst: dst_op.clone(),
         });
         instructions.push(SetCC(ConditionCode::Eq, dst_op));
@@ -420,7 +420,7 @@ impl AssemblyCreator {
         let condition_code = self.map_relational_operator(op);
         instructions.push(Mov {
             assembly_type: self.get_asm_type(dst),
-            src: Operand::Immediate(0),
+            src: Operand::Immediate(ImmValue::Int(0)),
             dst: dst_op.clone(),
         });
         instructions.push(SetCC(condition_code, dst_op));
@@ -470,7 +470,7 @@ impl AssemblyCreator {
         let condition_op = self.create_operand(condition);
         instructions.push(Cmp {
             assembly_type: self.get_asm_type(condition),
-            op1: Operand::Immediate(0),
+            op1: Operand::Immediate(ImmValue::Int(0)),
             op2: condition_op,
         });
         instructions.push(JmpCC(ConditionCode::Eq, target.to_string()));
@@ -487,7 +487,7 @@ impl AssemblyCreator {
         let condition_op = self.create_operand(condition);
         instructions.push(Cmp {
             assembly_type: self.get_asm_type(condition),
-            op1: Operand::Immediate(0),
+            op1: Operand::Immediate(ImmValue::Int(0)),
             op2: condition_op,
         });
         instructions.push(JmpCC(ConditionCode::NotEq, target.to_string()));
@@ -511,8 +511,8 @@ impl AssemblyCreator {
 
     fn create_operand(&mut self, value: &Value) -> Operand {
         match value {
-            Value::IntegerConstant(i) => Operand::Immediate(*i),
-            Value::LongConstant(l) => Operand::Immediate(*l as i32),
+            Value::IntegerConstant(i) => Operand::Immediate(ImmValue::Int(*i)),
+            Value::LongConstant(l) => Operand::Immediate(ImmValue::Long(*l)),
             Value::Variable(name) => Operand::PseudoReg(name.clone()),
         }
     }
@@ -584,7 +584,7 @@ impl AssemblyCreator {
         Instruction::Binary {
             assembly_type: AssemblyType::Longword,
             op: crate::assembly::ast::BinaryOp::Sub,
-            left: Operand::Immediate(bytes),
+            left: Operand::Immediate(ImmValue::Int(bytes)),
             right: Operand::Register(Register::SP),
         }
     }
@@ -593,7 +593,7 @@ impl AssemblyCreator {
         Instruction::Binary {
             assembly_type: AssemblyType::Longword,
             op: crate::assembly::ast::BinaryOp::Add,
-            left: Operand::Immediate(bytes),
+            left: Operand::Immediate(ImmValue::Int(bytes)),
             right: Operand::Register(Register::SP),
         }
     }
@@ -748,7 +748,7 @@ mod tests {
             &instructions[0],
             AsmInstruction::Mov {
                 assembly_type: AssemblyType::Longword,
-                src: AsmOperand::Immediate(1),
+                src: AsmOperand::Immediate(ImmValue::Int(1)),
                 dst: AsmOperand::PseudoReg(name)
             } if name == "tmp.0"
         ));
@@ -757,7 +757,7 @@ mod tests {
             AsmInstruction::Binary {
                 assembly_type: AssemblyType::Longword,
                 op: AsmBinaryOp::Add,
-                left: AsmOperand::Immediate(2),
+                left: AsmOperand::Immediate(ImmValue::Int(2)),
                 right: AsmOperand::PseudoReg(name)
             } if name == "tmp.0"
         ));
@@ -775,8 +775,8 @@ mod tests {
             AsmInstruction::Binary {
                 assembly_type: AssemblyType::Longword,
                 op: AsmBinaryOp::Sub,
-                left: AsmOperand::Immediate(3),
-                right: AsmOperand::PseudoReg(name)
+                left: AsmOperand::Immediate(ImmValue::Int(3)),
+                right: AsmOperand::PseudoReg(name),
             } if name == "tmp.1"
         ));
 
@@ -793,7 +793,7 @@ mod tests {
             AsmInstruction::Binary {
                 assembly_type: AssemblyType::Longword,
                 op: AsmBinaryOp::Mul,
-                left: AsmOperand::Immediate(4),
+                left: AsmOperand::Immediate(ImmValue::Int(4)),
                 right: AsmOperand::PseudoReg(name)
             } if name == "tmp.2"
         ));
@@ -814,7 +814,7 @@ mod tests {
             &instructions[8],
             AsmInstruction::Idiv {
                 assembly_type: AssemblyType::Longword,
-                operand: AsmOperand::Immediate(5),
+                operand: AsmOperand::Immediate(ImmValue::Int(5)),
             },
         ));
         assert!(matches!(
@@ -842,7 +842,7 @@ mod tests {
             &instructions[12],
             AsmInstruction::Idiv {
                 assembly_type: AssemblyType::Longword,
-                operand: AsmOperand::Immediate(2),
+                operand: AsmOperand::Immediate(ImmValue::Int(2)),
             },
         ));
         assert!(matches!(
