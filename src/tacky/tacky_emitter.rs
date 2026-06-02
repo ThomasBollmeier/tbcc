@@ -66,7 +66,11 @@ impl TackyEmitter {
                         Some(InitialValue::Initialized(InitValue::Long(lval))) => {
                             LongConstant(*lval)
                         }
-                        Some(InitialValue::Tentative) => IntegerConstant(0),
+                        Some(InitialValue::Tentative) => match entry.c_type {
+                            Type::Int => IntegerConstant(0),
+                            Type::Long => LongConstant(0),
+                            _ => unreachable!(),
+                        },
                         None => return None,
                     };
                     Some(TopLevel::StaticVariable(

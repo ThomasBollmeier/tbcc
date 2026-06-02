@@ -57,16 +57,44 @@ impl LoopLabeler {
 
     fn validate_arms(&mut self, arms: &Vec<(String, Option<TypedExpression>)>) -> Result<()> {
         let mut cnt_default = 0;
-        let mut case_values: HashSet<i32> = HashSet::new();
+        let mut case_values: HashSet<i64> = HashSet::new();
 
         for (_, expr) in arms {
             match expr {
                 Some(TypedExpression(expr, _)) => match expr {
                     Expression::IntegerConstant(value) => {
+                        let val = *value as i64;
+                        if case_values.contains(&val) {
+                            return Err(anyhow::anyhow!("case arm value is already used"));
+                        }
+                        case_values.insert(val);
+                    }
+                    Expression::LongConstant(value) => {
                         if case_values.contains(&value) {
                             return Err(anyhow::anyhow!("case arm value is already used"));
                         }
                         case_values.insert(*value);
+                    }
+                    Expression::Cast {
+                        expr: inner_expr,
+                        ..
+                    } => {
+                        match inner_expr.0 {
+                            Expression::IntegerConstant(value) => {
+                                let val = value as i64;
+                                if case_values.contains(&val) {
+                                    return Err(anyhow::anyhow!("case arm value is already used"));
+                                }
+                                case_values.insert(val);
+                            }
+                            Expression::LongConstant(value) => {
+                                if case_values.contains(&value) {
+                                    return Err(anyhow::anyhow!("case arm value is already used"));
+                                }
+                                case_values.insert(value);
+                            }
+                            _ => return Err(anyhow::anyhow!("case arm expression is not an integer")),
+                        }
                     }
                     _ => return Err(anyhow::anyhow!("case arm expression is not an integer")),
                 },

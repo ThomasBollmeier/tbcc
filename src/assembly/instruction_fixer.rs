@@ -1,7 +1,7 @@
 use crate::assembly::assembly_creator::AssemblyCreator;
 use crate::assembly::ast::AssemblyType::{Longword, Quadword};
 use crate::assembly::ast::Instruction::{Mov, MovSx};
-use crate::assembly::ast::Operand::Register;
+use crate::assembly::ast::Operand::{Immediate, Register};
 use crate::assembly::ast::Register::{R10, R11};
 use crate::assembly::ast::{AssemblyType, BinaryOp, ImmValue, Instruction, Operand, VisitorMut};
 
@@ -45,8 +45,8 @@ impl InstructionFixer {
                 match src {
                     Operand::Immediate(ImmValue::Long(l)) => {
                         Operand::Immediate(ImmValue::Int(*l as i32))
-                    },
-                    _ => unreachable!()
+                    }
+                    _ => unreachable!(),
                 }
             } else {
                 src.clone()
@@ -125,11 +125,11 @@ impl InstructionFixer {
             Register::{CX, R10, R11},
         };
 
-        let left = match op {
+        let (left, replaced) = match op {
             Add | Sub | Mul => {
                 &Self::replace_long_src_operand(assembly_type, left, new_instructions)
             }
-            _ => left,
+            _ => &(left.clone(), false),
         };
 
         match op {
@@ -152,7 +152,16 @@ impl InstructionFixer {
                         dst: right.clone(),
                     });
                 } else {
-                    new_instructions.push(instruction.clone());
+                    if !replaced {
+                        new_instructions.push(instruction.clone());
+                    } else {
+                        new_instructions.push(Binary {
+                            assembly_type: assembly_type.clone(),
+                            op: Mul,
+                            left: Register(R10),
+                            right: right.clone(),
+                        });
+                    }
                 }
             }
             ShiftLeft | ShiftRight => {
@@ -169,7 +178,16 @@ impl InstructionFixer {
                         right: right.clone(),
                     });
                 } else {
-                    new_instructions.push(instruction.clone());
+                    if !replaced {
+                        new_instructions.push(instruction.clone());
+                    } else {
+                        new_instructions.push(Binary {
+                            assembly_type: assembly_type.clone(),
+                            op: op.clone(),
+                            left: Register(R10),
+                            right: right.clone(),
+                        });
+                    }
                 }
             }
             Add | Sub | BitAnd | BitOr | BitXor => {
@@ -186,7 +204,16 @@ impl InstructionFixer {
                         right: right.clone(),
                     });
                 } else {
-                    new_instructions.push(instruction.clone());
+                    if !replaced {
+                        new_instructions.push(instruction.clone());
+                    } else {
+                        new_instructions.push(Binary {
+                            assembly_type: assembly_type.clone(),
+                            op: op.clone(),
+                            left: Register(R10),
+                            right: right.clone(),
+                        });
+                    }
                 }
             }
         }
@@ -196,17 +223,17 @@ impl InstructionFixer {
         assembly_type: &AssemblyType,
         left: &Operand,
         instructions: &mut Vec<Instruction>,
-    ) -> Operand {
+    ) -> (Operand, bool) {
         use crate::assembly::ast::{Instruction::Mov, Operand::Register, Register::R10};
-        if let Operand::Immediate(ImmValue::Long(_)) = left {
+        if let Immediate(ImmValue::Long(_)) = left {
             instructions.push(Mov {
                 assembly_type: assembly_type.clone(),
                 src: left.clone(),
                 dst: Register(R10),
             });
-            Register(R10)
+            (Register(R10), true)
         } else {
-            left.clone()
+            (left.clone(), false)
         }
     }
 
@@ -254,7 +281,7 @@ impl InstructionFixer {
             Register::{R10, R11},
         };
 
-        let op1 = &Self::replace_long_src_operand(assembly_type, op1, new_instructions);
+        let (op1, replaced) = &Self::replace_long_src_operand(assembly_type, op1, new_instructions);
 
         match (op1, op2) {
             (_, Immediate(_)) => {
@@ -282,9 +309,36 @@ impl InstructionFixer {
                         op2: op2.clone(),
                     });
                 } else {
-                    new_instructions.push(instruction.clone());
+                    if !replaced {
+                        new_instructions.push(instruction.clone());
+                    } else {
+                        new_instructions.push(Cmp {
+                            assembly_type: assembly_type.clone(),
+                            op1: Register(R10),
+                            op2: op2.clone(),
+                        });
+                    }
                 }
             }
+        }
+    }
+
+    fn handle_puah(
+        &self,
+        instruction: &Instruction,
+        operand: &Operand,
+        instructions: &mut Vec<Instruction>,
+    ) {
+        match operand {
+            Immediate(ImmValue::Long(_)) => {
+                instructions.push(Mov {
+                    assembly_type: Quadword,
+                    src: operand.clone(),
+                    dst: Register(R10),
+                });
+                instructions.push(Instruction::Push(Register(R10)));
+            }
+            _ => instructions.push(instruction.clone()),
         }
     }
 }
@@ -337,6 +391,7 @@ impl VisitorMut for InstructionFixer {
                     op1,
                     op2,
                 } => self.handle_cmp(instruction, assembly_type, op1, op2, &mut new_instructions),
+                Push(operand) => self.handle_puah(instruction, operand, &mut new_instructions),
                 _ => new_instructions.push(instruction.clone()),
             }
         }

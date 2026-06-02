@@ -4,7 +4,7 @@ use crate::assembly::ast::{AssemblyType, ImmValue, StaticVar, TopLevel as TopLev
 use crate::assembly::ast::{
     ConditionCode, FuncDef, Instruction, Operand, Program, Register, UnaryOp,
 };
-use crate::assembly::ast::AssemblyType::Longword;
+use crate::assembly::ast::AssemblyType::{Longword, Quadword};
 use crate::assembly::symbol_table::SymbolTableEntry as AsmSymbolTableEntry;
 use crate::common::symbol_table::SymbolTableEntry;
 use crate::common::symbol_table_generic::{SymbolTable, SymbolTableRef};
@@ -230,19 +230,23 @@ impl AssemblyCreator {
 
         // Remaining arguments pushed onto stack
         for arg in stack_args.iter().rev() {
-            let assembly_type = self.get_asm_type(arg);
+            let is_quadword = self.get_asm_type(arg) == Quadword;
             let op = self.create_operand(arg);
             match op {
                 Operand::Register(_) | Operand::Immediate(_) => {
                     instructions.push(Instruction::Push(op));
                 }
                 _ => {
-                    instructions.push(Instruction::Mov {
-                        assembly_type,
-                        src: op,
-                        dst: Operand::Register(AX),
-                    });
-                    instructions.push(Instruction::Push(Operand::Register(AX)));
+                    if is_quadword {
+                        instructions.push(Instruction::Push(op));
+                    } else {
+                        instructions.push(Instruction::Mov {
+                            assembly_type: Longword,
+                            src: op,
+                            dst: Operand::Register(AX),
+                        });
+                        instructions.push(Instruction::Push(Operand::Register(AX)));
+                    }
                 }
             }
         }
@@ -585,7 +589,7 @@ impl AssemblyCreator {
         use crate::common::Type::*;
         match c_type {
             Int => Longword,
-            Long => AssemblyType::Quadword,
+            Long => Quadword,
             _ => unimplemented!("unsupported type {:?}", c_type),
         }
     }
@@ -600,14 +604,14 @@ impl AssemblyCreator {
     fn get_asm_type(&self, value: &Value) -> AssemblyType {
         match value {
             Value::IntegerConstant(_) => Longword,
-            Value::LongConstant(_) => AssemblyType::Quadword,
+            Value::LongConstant(_) => Quadword,
             Value::Variable(name) => self.lookup_asm_type(name),
         }
     }
 
     pub fn allocate_stack(bytes: i32) -> Instruction {
         Instruction::Binary {
-            assembly_type: Longword,
+            assembly_type: Quadword,
             op: crate::assembly::ast::BinaryOp::Sub,
             left: Operand::Immediate(ImmValue::Int(bytes)),
             right: Operand::Register(Register::SP),
@@ -616,7 +620,7 @@ impl AssemblyCreator {
 
     pub fn deallocate_stack(bytes: i32) -> Instruction {
         Instruction::Binary {
-            assembly_type: Longword,
+            assembly_type: Quadword,
             op: crate::assembly::ast::BinaryOp::Add,
             left: Operand::Immediate(ImmValue::Int(bytes)),
             right: Operand::Register(Register::SP),
@@ -760,6 +764,67 @@ mod tests {
             }
 
             return 0;
+        }
+        "#;
+
+        run_code(code);
+    }
+
+    #[test]
+    fn creates_asm_program_3_ok() {
+        let code = r#"
+        int main(void) {
+            int b = -1;
+            b = b - 1;
+        }
+        "#;
+
+        run_code(code);
+    }
+
+    #[test]
+    fn creates_asm_program_4_ok() {
+        let code = r#"
+        long a;
+        long b;
+
+        int equal(void) {
+            return (a == b);
+        }
+
+        int main(void) {
+            a = 1152921504606846976l; // 2^60
+            b = a;
+            if (equal())
+                return 0;
+
+            return 99;
+        }
+        "#;
+
+        run_code(code);
+    }
+
+    #[test]
+    fn creates_asm_program_5_ok() {
+        let code = r#"
+        int switch_on_long(long l) {
+            switch (l) {
+                case 0: return 0;
+                case 100: return 1;
+                case 8589934592l: // 2^33
+                    return 2;
+                default:
+                    return -1;
+            }
+        }
+
+        int main(void) {
+            if (switch_on_long(8589934592) != 2)
+                return 1;
+            if (switch_on_long(100) != 1)
+                return 2;
+            return 0; // success
         }
         "#;
 

@@ -217,7 +217,7 @@ dependencies = [
 
 [[package]]
 name = "tbcc"
-version = "0.11.0"
+version = "0.1.11"
 dependencies = [
  "anyhow",
  "clap",

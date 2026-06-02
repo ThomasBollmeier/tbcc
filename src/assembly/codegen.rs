@@ -1,10 +1,7 @@
-use crate::assembly::ast::{
-    BinaryOp, ConditionCode, FuncDef, Instruction, Operand, Program, Register, StaticVar,
-    UnaryOp, Visitor,
-};
+use crate::assembly::ast::{AssemblyType, BinaryOp, ConditionCode, FuncDef, Instruction, Operand, Program, Register, StaticVar, UnaryOp, Visitor};
 use crate::assembly::symbol_table::SymbolTableEntry;
-use crate::common::symbol_table_generic::SymbolTableRef;
 use crate::common::InitValue;
+use crate::common::symbol_table_generic::SymbolTableRef;
 
 pub struct CodeGenerator {
     code: String,
@@ -36,9 +33,9 @@ impl CodeGenerator {
         self.code.push_str(&format!("# {}\n", comment));
     }
 
-    fn operand_8byte_to_string(&mut self, operand: &Operand) -> String {
+    fn operand_8byte_to_string(&self, operand: &Operand) -> String {
         match operand {
-            Operand::Immediate(imm) => format!("{}", imm),
+            Operand::Immediate(imm) => format!("${}", imm),
             Operand::Register(Register::AX) => "%rax".to_string(),
             Operand::Register(Register::CX) => "%rcx".to_string(),
             Operand::Register(Register::DX) => "%rdx".to_string(),
@@ -67,7 +64,7 @@ impl CodeGenerator {
             Operand::Register(Register::R9) => "%r9d".to_string(),
             Operand::Register(Register::R10) => "%r10d".to_string(),
             Operand::Register(Register::R11) => "%r11d".to_string(),
-            Operand::Register(Register::SP) => "%rsp".to_string(),
+            Operand::Register(Register::SP) => "%esp".to_string(),
             Operand::Stack(offset) => format!("{}(%rbp)", offset),
             Operand::Data(label) => self.get_variable_op_name(label),
             _ => panic!("Unsupported operand type: {:?}", operand),
@@ -86,31 +83,42 @@ impl CodeGenerator {
             Operand::Register(Register::R9) => "%r9b".to_string(),
             Operand::Register(Register::R10) => "%r10b".to_string(),
             Operand::Register(Register::R11) => "%r11b".to_string(),
-            Operand::Register(Register::SP) => "%rsp".to_string(),
+            Operand::Register(Register::SP) => "%spl".to_string(),
             Operand::Stack(offset) => format!("{}(%rbp)", offset),
             Operand::Data(label) => self.get_variable_op_name(label),
             _ => panic!("Unsupported operand type: {:?}", operand),
         }
     }
 
-    fn unary_op_to_string(&self, unary_op: &UnaryOp) -> String {
-        match unary_op {
-            UnaryOp::Neg => "negl".to_string(),
-            UnaryOp::Not => "notl".to_string(),
+    fn operand_to_string(&self, operand: &Operand, assembly_type: &AssemblyType) -> String {
+        match assembly_type {
+            AssemblyType::Longword => self.operand_4byte_to_string(&operand),
+            AssemblyType::Quadword => self.operand_8byte_to_string(&operand),
         }
     }
 
-    fn binary_op_to_string(&self, binary_op: &BinaryOp) -> String {
-        match binary_op {
-            BinaryOp::Add => "addl".to_string(),
-            BinaryOp::Sub => "subl".to_string(),
-            BinaryOp::Mul => "imull".to_string(),
-            BinaryOp::BitAnd => "andl".to_string(),
-            BinaryOp::BitOr => "orl".to_string(),
-            BinaryOp::BitXor => "xorl".to_string(),
-            BinaryOp::ShiftLeft => "shll".to_string(),
-            BinaryOp::ShiftRight => "sarl".to_string(),
-        }
+    fn unary_op_to_string(&self, unary_op: &UnaryOp, assembly_type: &AssemblyType) -> String {
+        let instruction = match unary_op {
+            UnaryOp::Neg => "neg".to_string(),
+            UnaryOp::Not => "not".to_string(),
+        };
+        let suffix = self.get_instruction_suffix(assembly_type);
+        format!("{}{}", instruction, suffix)
+    }
+
+    fn binary_op_to_string(&self, binary_op: &BinaryOp, assembly_type: &AssemblyType) -> String {
+        let instruction = match binary_op {
+            BinaryOp::Add => "add".to_string(),
+            BinaryOp::Sub => "sub".to_string(),
+            BinaryOp::Mul => "imul".to_string(),
+            BinaryOp::BitAnd => "and".to_string(),
+            BinaryOp::BitOr => "or".to_string(),
+            BinaryOp::BitXor => "xor".to_string(),
+            BinaryOp::ShiftLeft => "shl".to_string(),
+            BinaryOp::ShiftRight => "sar".to_string(),
+        };
+        let suffix = self.get_instruction_suffix(assembly_type);
+        format!("{}{}", instruction, suffix)
     }
 
     fn condition_code_to_suffix(&self, condition_code: &ConditionCode) -> String {
@@ -180,6 +188,13 @@ impl CodeGenerator {
             unreachable!()
         }
     }
+
+    fn get_instruction_suffix(&self, assembly_type: &AssemblyType) -> String {
+        match assembly_type {
+            AssemblyType::Longword => String::from("l"),
+            AssemblyType::Quadword => String::from("q"),
+        }
+    }
 }
 
 impl Visitor for CodeGenerator {
@@ -213,9 +228,9 @@ impl Visitor for CodeGenerator {
             self.write_instruction(&format!(".globl {}", static_var.name));
         }
 
-        let value = match static_var.value {
-            InitValue::Int(i) => i as i64,
-            InitValue::Long(l) => l,
+        let (value, is_quadword) = match static_var.value {
+            InitValue::Int(i) => (i as i64, false),
+            InitValue::Long(l) => (l, true),
         };
 
         if value != 0 {
@@ -225,9 +240,9 @@ impl Visitor for CodeGenerator {
         }
 
         if cfg!(target_os = "linux") {
-            self.write_instruction(".align 4");
+            self.write_instruction(&format!(".align {}", static_var.alignment));
         } else if cfg!(target_os = "macos") {
-            self.write_instruction(".balign 4");
+            self.write_instruction(&format!(".balign {}", static_var.alignment));
         } else {
             unreachable!()
         }
@@ -235,47 +250,62 @@ impl Visitor for CodeGenerator {
         self.write_label(&self.get_variable_name(&static_var.name));
 
         if value != 0 {
-            self.write_instruction(&format!(".long {}", value));
+            if !is_quadword {
+                self.write_instruction(&format!(".long {}", value));
+            } else {
+                self.write_instruction(&format!(".quad {}", value));
+            }
         } else {
-            self.write_instruction(".zero 4");
+            let size = if !is_quadword { 4 } else { 8 };
+            self.write_instruction(&format!(".zero {size}"));
         }
     }
 
     fn visit_instruction(&mut self, instruction: &Instruction) {
         match instruction {
-            Instruction::Mov { src, dst, .. } => {
-                let src = self.operand_4byte_to_string(src);
-                let dst = self.operand_4byte_to_string(dst);
-                self.write_instruction(&format!("movl \t{src}, {dst}"));
+            Instruction::Mov { assembly_type, src  , dst} => {
+                let suffix = self.get_instruction_suffix(assembly_type);
+                let src = self.operand_to_string(src, assembly_type);
+                let dst = self.operand_to_string(dst, assembly_type);
+                self.write_instruction(&format!("mov{suffix} \t{src}, {dst}"));
             }
-            Instruction::MovSx { .. } => todo!("implement"),
+            Instruction::MovSx { src, dst, .. } => {
+                let src_str = self.operand_4byte_to_string(src);
+                let dst_str = self.operand_8byte_to_string(dst);
+                self.write_instruction(&format!("movslq \t{src_str}, {dst_str}"));
+            }
             Instruction::Ret => {
                 self.write_instruction("movq \t%rbp, %rsp");
                 self.write_instruction("popq \t%rbp");
                 self.write_instruction("ret");
             }
-            Instruction::Unary { op, operand, .. } => {
-                let op_str = self.unary_op_to_string(op);
-                let operand_str = self.operand_4byte_to_string(operand);
+            Instruction::Unary { assembly_type, op, operand} => {
+                let op_str = self.unary_op_to_string(op, assembly_type);
+                let operand_str = self.operand_to_string(operand, assembly_type);
                 self.write_instruction(&format!("{op_str} \t{operand_str}"));
             }
             Instruction::Binary {
-                op, left, right, ..
+                op, left, right, assembly_type,
             } => {
-                let op_str = self.binary_op_to_string(op);
-                let left_str = self.operand_4byte_to_string(left);
-                let right_str = self.operand_4byte_to_string(right);
+                let op_str = self.binary_op_to_string(op, assembly_type);
+                let left_str = self.operand_to_string(left, assembly_type);
+                let right_str = self.operand_to_string(right, assembly_type);
                 self.write_instruction(&format!("{op_str} \t{left_str}, {right_str}"));
             }
-            Instruction::Idiv { operand, .. } => {
-                let operand_str = self.operand_4byte_to_string(operand);
-                self.write_instruction(&format!("idivl \t{operand_str}"));
+            Instruction::Idiv { operand, assembly_type } => {
+                let suffix = self.get_instruction_suffix(assembly_type);
+                let operand_str = self.operand_to_string(operand, assembly_type);
+                self.write_instruction(&format!("idiv{suffix} \t{operand_str}"));
             }
-            Instruction::Cdq(_) => self.write_instruction("cdq"),
-            Instruction::Cmp { op1, op2, .. } => {
-                let op1_str = self.operand_4byte_to_string(op1);
-                let op2_str = self.operand_4byte_to_string(op2);
-                self.write_instruction(&format!("cmpl \t{op1_str}, {op2_str}"));
+            Instruction::Cdq(assembly_type ) => match assembly_type {
+                AssemblyType::Longword => self.write_instruction("cdq"),
+                AssemblyType::Quadword => self.write_instruction("cqo"),
+            },
+            Instruction::Cmp { op1, op2, assembly_type } => {
+                let suffix = self.get_instruction_suffix(assembly_type);
+                let op1_str = self.operand_to_string(op1, assembly_type);
+                let op2_str = self.operand_to_string(op2, assembly_type);
+                self.write_instruction(&format!("cmp{suffix} \t{op1_str}, {op2_str}"));
             }
             Instruction::Jmp(label) => {
                 let label = self.local_label(label);

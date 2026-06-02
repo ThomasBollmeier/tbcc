@@ -1,7 +1,7 @@
 use crate::ast::Expression::{BinaryExpr, Cast, FuncCall};
 use crate::ast::{
-    BinaryOp, Expression, ForInit, FunctionDeclaration, Program, Statement, StorageClass, Type,
-    TypedExpression, UnaryOp, VarDeclaration,
+    BinaryOp, Expression, ForInit, FunctionDeclaration, Label, Program, Statement, StorageClass,
+    Type, TypedExpression, UnaryOp, VarDeclaration,
 };
 use crate::common::symbol_table::{IdentAttrs, InitValue, InitialValue, SymbolTableEntry};
 use crate::common::symbol_table_generic::SymbolTableRef;
@@ -10,6 +10,7 @@ use anyhow::{Result, anyhow};
 
 pub struct TypeChecker {
     current_function: Option<FunctionDeclaration>,
+    current_switch_condition_type: Option<Type>,
     is_for_init_decl: bool,
     symbol_table: SymbolTableRef<SymbolTableEntry>,
 }
@@ -18,6 +19,7 @@ impl TypeChecker {
     pub fn new(symbol_table: SymbolTableRef<SymbolTableEntry>) -> Self {
         Self {
             current_function: None,
+            current_switch_condition_type: None,
             is_for_init_decl: false,
             symbol_table,
         }
@@ -551,7 +553,7 @@ impl TypeChecker {
                 Type::Int,
             )),
             _ => Ok(TypedExpression::with_type(
-                Expression::UnaryExpr(UnaryOp::Not, Box::new(operand.clone())),
+                Expression::UnaryExpr(unary_op.clone(), Box::new(operand.clone())),
                 operand.get_type(),
             )),
         }
@@ -801,34 +803,22 @@ impl VisitorMut for TypeChecker {
                 }
             }
             SwitchStatement {
-                condition,
-                body,
-                arms,
-                ..
+                condition, body, ..
             } => {
                 *condition = self.set_type(condition)?;
-                let mut condition_type = condition.get_type();
+                self.current_switch_condition_type = Some(condition.get_type());
                 body.accept_mut(self)?;
-                for (_, typed_expr) in arms {
-                    if let Some(typed_expr) = typed_expr {
-                        let case_expr = self.set_type(typed_expr)?;
-                        let common_type =
-                            Self::get_common_type(&case_expr.get_type(), &condition_type);
-                        if common_type == Type::Undefined {
-                            return Err(anyhow!(
-                                "Case expression type is incompatible with switch condition type"
-                            ));
-                        }
-                        *typed_expr = Self::convert_to(&case_expr, &common_type);
-                        if condition_type != common_type {
-                            condition_type = common_type.clone();
-                            *condition = Self::convert_to(&condition, &common_type);
-                        }
-                    }
-                }
+                self.current_switch_condition_type = None;
             }
             GotoStatement(..) => {}
-            LabeledStatement { statement, .. } => {
+            LabeledStatement { label, statement } => {
+                if let Label::Case { value, .. } = label {
+                    let condition_type = match &self.current_switch_condition_type {
+                        Some(condition_type) => condition_type.clone(),
+                        None => return Err(anyhow!("case label not within switch statement")),
+                    };
+                    *value = Self::convert_to(&self.set_type(value)?, &condition_type);
+                }
                 statement.accept_mut(self)?;
             }
         }
@@ -844,12 +834,12 @@ impl VisitorMut for TypeChecker {
 mod tests {
     use crate::ast::Program;
     use crate::common::symbol_table;
+    use crate::common::symbol_table_generic::{SymbolTable, SymbolTableRef};
     use crate::lexer::Lexer;
     use crate::parser::Parser;
     use crate::semantic::type_checker::TypeChecker;
     use crate::semantic::{IdentifierResolver, make_var_name_generator};
     use anyhow::Result;
-    use crate::common::symbol_table_generic::{SymbolTable, SymbolTableRef};
 
     #[test]
     fn check_ok() {
@@ -932,6 +922,25 @@ mod tests {
         check_code(code).expect_err("Expected code to fail type checking");
     }
 
+    #[test]
+    fn switch_with_long_as_case_value() {
+        let code = r#"
+
+        int main(void) {
+            int answer = 42;
+
+            switch (answer) {
+            case 42L:
+                return 0;
+            default:
+                return 1;
+            }
+        }
+        "#;
+
+        check_code(code).expect("Expected code to type check successfully");
+    }
+
     fn check_code(code: &str) -> Result<Program> {
         let lexer = Lexer::new();
         let parser = Parser::new();
@@ -946,6 +955,8 @@ mod tests {
 
         let mut type_checker = TypeChecker::new(symbol_table);
         type_checker.check(&mut program)?;
+
+        dbg!(&program);
 
         Ok(program)
     }
