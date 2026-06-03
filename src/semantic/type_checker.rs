@@ -10,7 +10,7 @@ use anyhow::{Result, anyhow};
 
 pub struct TypeChecker {
     current_function: Option<FunctionDeclaration>,
-    current_switch_condition_type: Option<Type>,
+    switch_condition_types: Vec<Type>,
     is_for_init_decl: bool,
     symbol_table: SymbolTableRef<SymbolTableEntry>,
 }
@@ -19,7 +19,7 @@ impl TypeChecker {
     pub fn new(symbol_table: SymbolTableRef<SymbolTableEntry>) -> Self {
         Self {
             current_function: None,
-            current_switch_condition_type: None,
+            switch_condition_types: vec![],
             is_for_init_decl: false,
             symbol_table,
         }
@@ -499,6 +499,12 @@ impl TypeChecker {
                     Type::Int,
                 ));
             }
+            BinaryOp::ShiftLeft | BinaryOp::ShiftRight => {
+                return Ok(TypedExpression::with_type(
+                    BinaryExpr(binary_op.clone(), Box::new(left.clone()), Box::new(right)),
+                    left.get_type(),
+                ));
+            }
             _ => {}
         }
 
@@ -511,7 +517,10 @@ impl TypeChecker {
             | BinaryOp::Subtract
             | BinaryOp::Multiply
             | BinaryOp::Divide
-            | BinaryOp::Remainder => {
+            | BinaryOp::Remainder
+            | BinaryOp::BitAnd
+            | BinaryOp::BitOr
+            | BinaryOp::BitXor => {
                 // Check operator types:
                 match left.get_type() {
                     Type::Function { .. } | Type::Undefined => {
@@ -806,17 +815,17 @@ impl VisitorMut for TypeChecker {
                 condition, body, ..
             } => {
                 *condition = self.set_type(condition)?;
-                self.current_switch_condition_type = Some(condition.get_type());
+                self.switch_condition_types.push(condition.get_type());
                 body.accept_mut(self)?;
-                self.current_switch_condition_type = None;
+                self.switch_condition_types.pop();
             }
             GotoStatement(..) => {}
             LabeledStatement { label, statement } => {
                 if let Label::Case { value, .. } = label {
-                    let condition_type = match &self.current_switch_condition_type {
-                        Some(condition_type) => condition_type.clone(),
-                        None => return Err(anyhow!("case label not within switch statement")),
-                    };
+                    if self.switch_condition_types.is_empty() {
+                        return Err(anyhow!("case label not within switch statement"));
+                    }
+                    let condition_type = self.switch_condition_types.last().unwrap().clone();
                     *value = Self::convert_to(&self.set_type(value)?, &condition_type);
                 }
                 statement.accept_mut(self)?;

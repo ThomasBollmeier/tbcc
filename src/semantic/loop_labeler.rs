@@ -1,4 +1,4 @@
-use crate::ast::{Expression, Label, Statement, TypedExpression};
+use crate::ast::{Expression, Label, Statement, Type, TypedExpression};
 use crate::semantic::walker;
 use crate::semantic::walker::WalkerMut;
 use crate::semantic::{NameGeneratorRef, name_generator};
@@ -77,24 +77,26 @@ impl LoopLabeler {
                     }
                     Expression::Cast {
                         expr: inner_expr,
-                        ..
+                        target_type,
                     } => {
-                        match inner_expr.0 {
+                        let case_val = match inner_expr.0 {
                             Expression::IntegerConstant(value) => {
-                                let val = value as i64;
-                                if case_values.contains(&val) {
-                                    return Err(anyhow::anyhow!("case arm value is already used"));
-                                }
-                                case_values.insert(val);
+                                value as i64
                             }
                             Expression::LongConstant(value) => {
-                                if case_values.contains(&value) {
-                                    return Err(anyhow::anyhow!("case arm value is already used"));
+                                if *target_type == Type::Int {
+                                    (value as i32) as i64
+                                } else {
+                                    value
                                 }
-                                case_values.insert(value);
                             }
                             _ => return Err(anyhow::anyhow!("case arm expression is not an integer")),
+                        };
+
+                        if case_values.contains(&case_val) {
+                            return Err(anyhow::anyhow!("case arm value is already used"));
                         }
+                        case_values.insert(case_val);
                     }
                     _ => return Err(anyhow::anyhow!("case arm expression is not an integer")),
                 },

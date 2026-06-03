@@ -34,7 +34,7 @@ impl InstructionFixer {
     ) {
         use crate::assembly::ast::{Instruction::Mov, Operand::Register, Register::R10};
 
-        let src_is_long = if let Operand::Immediate(ImmValue::Long(_)) = src {
+        let src_is_long = if let Immediate(ImmValue::Long(_)) = src {
             true
         } else {
             false
@@ -43,8 +43,8 @@ impl InstructionFixer {
         if Self::all_memory(&[src, dst]) || src_is_long {
             let src = if *assembly_type == Longword && src_is_long {
                 match src {
-                    Operand::Immediate(ImmValue::Long(l)) => {
-                        Operand::Immediate(ImmValue::Int(*l as i32))
+                    Immediate(ImmValue::Long(l)) => {
+                        Immediate(ImmValue::Int(*l as i32))
                     }
                     _ => unreachable!(),
                 }
@@ -126,10 +126,8 @@ impl InstructionFixer {
         };
 
         let (left, replaced) = match op {
-            Add | Sub | Mul => {
-                &Self::replace_long_src_operand(assembly_type, left, new_instructions)
-            }
-            _ => &(left.clone(), false),
+            ShiftLeft | ShiftRight => (left.clone(), false),
+            _ => Self::replace_long_src_operand(assembly_type, left, new_instructions)
         };
 
         match op {
@@ -165,10 +163,10 @@ impl InstructionFixer {
                 }
             }
             ShiftLeft | ShiftRight => {
-                if Self::is_memory(left) {
+                if Self::is_memory(&left) {
                     new_instructions.push(Mov {
                         assembly_type: assembly_type.clone(),
-                        src: left.clone(),
+                        src: left,
                         dst: Register(CX),
                     });
                     new_instructions.push(Binary {
@@ -191,7 +189,7 @@ impl InstructionFixer {
                 }
             }
             Add | Sub | BitAnd | BitOr | BitXor => {
-                if Self::all_memory(&[left, right]) {
+                if Self::all_memory(&[&left, right]) {
                     new_instructions.push(Mov {
                         assembly_type: assembly_type.clone(),
                         src: left.clone(),

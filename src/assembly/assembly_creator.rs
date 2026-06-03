@@ -832,6 +832,45 @@ mod tests {
     }
 
     #[test]
+    fn creates_asm_program_6_ok() {
+        let code = r#"
+        long main(void) {
+          // bitwise compound operations on long integers
+            long l1 = 71777214294589695l;  // 0x00ff_00ff_00ff_00ff
+            long l2 = -4294967296;  // -2^32; upper 32 bits are 1, lower 32 bits are 0
+
+            l1 &= l2; // should zero out the lower 32 bits of l1
+
+            if (l1 != 71777214277877760l) {
+              return l1;
+            }
+
+            return 42;
+
+        }
+        "#;
+
+        run_code(code);
+    }
+
+    #[test]
+    fn creates_asm_program_7_ok() {
+        let code = r#"
+        int main(void) {
+            int x = 1;
+            if (x << 3l != 8) {
+                return 1;
+            }
+
+            return 0;
+        }
+
+        "#;
+
+        run_code(code);
+    }
+
+    #[test]
     fn creates_asm_program_with_binary_ops() {
         let symbol_table: SymbolTableRef<SymbolTableEntry> = SymbolTable::new_ref();
 
