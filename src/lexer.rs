@@ -40,7 +40,9 @@ impl TokenDerivation for IntLongTokenDerivation {
     fn derive_token_type(&self, lexeme: &str) -> Result<TokenType> {
         match self.derive_token_value(lexeme)? {
             Some(TokenValue::Integer(_)) => Ok(TokenType::IntegerConstant),
+            Some(TokenValue::UnsignedInteger(_)) => Ok(TokenType::UnsignedIntegerConstant),
             Some(TokenValue::Long(_)) => Ok(TokenType::LongConstant),
+            Some(TokenValue::UnsignedLong(_)) => Ok(TokenType::UnsignedLongConstant),
             None => Err(anyhow::anyhow!(
                 "{} is not a valid int or long literal",
                 lexeme
@@ -49,7 +51,23 @@ impl TokenDerivation for IntLongTokenDerivation {
     }
 
     fn derive_token_value(&self, lexeme: &str) -> Result<Option<TokenValue>> {
-        if lexeme.ends_with("l") || lexeme.ends_with("L") {
+        let regex_ul = Regex::new("([uU][lL]|[lL][uU])$")?;
+        let regex_u = Regex::new("[uU]$")?;
+        let regex_l = Regex::new("[lL]$")?;
+
+        if regex_ul.is_match(lexeme)? {
+            let lexeme = &lexeme[..lexeme.len() - 2]; // Remove the trailing 'ul', 'uL', 'Ul', or 'UL'
+            let ulong_val = lexeme.parse::<u64>()?;
+            Ok(Some(TokenValue::UnsignedLong(ulong_val)))
+        } else if regex_u.is_match(lexeme)? {
+            let lexeme = &lexeme[..lexeme.len() - 1]; // Remove the trailing 'u' or 'U'
+            let u_val = lexeme.parse::<u32>();
+            if u_val.is_ok() {
+                return Ok(Some(TokenValue::UnsignedInteger(u_val?)));
+            }
+            let ulong_val = lexeme.parse::<u64>()?;
+            Ok(Some(TokenValue::UnsignedLong(ulong_val)))
+        } else if regex_l.is_match(lexeme)? {
             let lexeme = &lexeme[..lexeme.len() - 1]; // Remove the trailing 'l' or 'L'
             let long_val = lexeme.parse::<i64>()?;
             Ok(Some(TokenValue::Long(long_val)))
@@ -58,8 +76,12 @@ impl TokenDerivation for IntLongTokenDerivation {
             if int_val.is_ok() {
                 return Ok(Some(TokenValue::Integer(int_val?)));
             }
-            let long_val = lexeme.parse::<i64>()?;
-            Ok(Some(TokenValue::Long(long_val)))
+            let long_val = lexeme.parse::<i64>();
+            if long_val.is_ok() {
+                return Ok(Some(TokenValue::Long(long_val?)));
+            }
+            let ulong_val = lexeme.parse::<u64>()?;
+            Ok(Some(TokenValue::UnsignedLong(ulong_val)))
         }
     }
 }
@@ -91,7 +113,10 @@ impl Lexer {
         lexer.add_token_rule_full(TokenType::Whitespace, r"\s+", true, false);
         lexer.add_token_rule_full(TokenType::LineComment, r"//.*", true, false);
 
-        lexer.add_token_rule(IntLongTokenDerivation, r"\d+[lL]?\b");
+        lexer.add_token_rule(
+            IntLongTokenDerivation,
+            r"\d+([lL]|[uU]|[lL][uU]|[uU][lL])?\b",
+        );
         lexer.add_token_rule(TokenType::Identifier, r"[a-zA-Z_][a-zA-Z0-9_]*\b");
         lexer.add_token_rule(TokenType::LeftParen, r"\(");
         lexer.add_token_rule(TokenType::RightParen, r"\)");
@@ -139,6 +164,8 @@ impl Lexer {
 
         lexer.keywords.insert("int".to_string(), TokenType::Int);
         lexer.keywords.insert("long".to_string(), TokenType::Long);
+        lexer.keywords.insert("signed".to_string(), TokenType::Signed);
+        lexer.keywords.insert("unsigned".to_string(), TokenType::Unsigned);
         lexer.keywords.insert("void".to_string(), TokenType::Void);
         lexer
             .keywords
@@ -365,12 +392,55 @@ mod tests {
     }
 
     #[test]
+    fn scan_number_constants() {
+        let lexer = Lexer::new();
+        let code = r#"
+           42
+           42l
+           42L
+           42u
+           42U
+           42ul
+           42uL
+           42Ul
+           42UL
+           42lu
+           42lU
+           42Lu
+           42LU
+        "#;
+
+        let tokens = lexer.scan_tokens(code).unwrap();
+        assert_eq!(tokens.len(), 13);
+
+        assert_eq!(tokens[0].token_type, TokenType::IntegerConstant);
+        assert_eq!(tokens[0].value, Some(TokenValue::Integer(42)));
+
+        for i in 1..=2 {
+            assert_eq!(tokens[i].token_type, TokenType::LongConstant);
+            assert_eq!(tokens[i].value, Some(TokenValue::Long(42)));
+        }
+
+        for i in 3..=4 {
+            assert_eq!(tokens[i].token_type, TokenType::UnsignedIntegerConstant);
+            assert_eq!(tokens[i].value, Some(TokenValue::UnsignedInteger(42)));
+        }
+
+        for i in 5..=12 {
+            assert_eq!(tokens[i].token_type, TokenType::UnsignedLongConstant);
+            assert_eq!(tokens[i].value, Some(TokenValue::UnsignedLong(42)));
+        }
+
+    }
+
+    #[test]
     fn scan_main_function() {
         let lexer = Lexer::new();
         let code = r#"
-int main(void) {
-    return 42;
-}"#;
+        int main(void) {
+            return 42;
+        }
+        "#;
 
         let tokens = lexer.scan_tokens(code).unwrap();
         assert_eq!(tokens.len(), 10);
@@ -682,5 +752,27 @@ int main(void) {
         assert_eq!(tokens[3].value, Some(TokenValue::Long(42)));
         assert_eq!(tokens[3].lexeme, "42L");
         assert_eq!(tokens[4].token_type, TokenType::Semicolon);
+    }
+
+    #[test]
+    fn scan_promote_constants() {
+        let lexer = Lexer::new();
+
+        let code = r#"
+        long negative_one = 1l; // can't use negative static initializers; negate this in main
+
+        int main(void) {
+
+            negative_one = -negative_one;
+            if (68719476736u >= negative_one) {
+                return 1;
+            }
+
+            return 0;
+        }
+        "#;
+
+        let tokens = lexer.scan_tokens(code).unwrap();
+        assert_eq!(tokens.len(), 31);
     }
 }

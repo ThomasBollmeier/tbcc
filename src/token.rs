@@ -4,9 +4,13 @@ pub enum TokenType {
     LineComment,
     Identifier,
     IntegerConstant,
+    UnsignedIntegerConstant,
     LongConstant,
+    UnsignedLongConstant,
     Int,
     Long,
+    Signed,
+    Unsigned,
     Void,
     Return,
     LeftParen,
@@ -70,7 +74,9 @@ pub enum TokenType {
 #[derive(Debug, Clone, PartialEq)]
 pub enum TokenValue {
     Integer(i32),
+    UnsignedInteger(u32),
     Long(i64),
+    UnsignedLong(u64),
 }
 
 #[derive(Debug, Clone)]
