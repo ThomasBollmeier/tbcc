@@ -440,7 +440,9 @@ impl TackyEmitter {
         let expr_type = expr.get_type();
         match &expr.0 {
             Expression::IntegerConstant(value) => self.emit_integer_constant(*value),
+            Expression::UnsignedIntegerConstant(_value) => todo!("Unsigned integer constants are not supported yet"),
             Expression::LongConstant(value) => self.emit_long_constant(*value),
+            Expression::UnsignedLongConstant(_value) => todo!("Unsigned integer constants are not supported yet"),
             Expression::UnaryExpr(op, expr) => {
                 self.emit_unary_expr(op, expr, &expr_type, instructions)
             }

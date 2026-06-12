@@ -422,7 +422,9 @@ impl TypeChecker {
 
         match &typed_expr.0 {
             IntegerConstant(_) => self.set_type_integer_constant(typed_expr),
+            UnsignedIntegerConstant(_) => todo!("implement unsigned integer constant"),
             LongConstant(_) => self.set_type_long_constant(typed_expr),
+            UnsignedLongConstant(_) => todo!("implement unsigned long constant"),
             Cast { expr, target_type } => self.set_type_cast(expr, target_type),
             Var(name) => self.set_type_var(name, typed_expr),
             FuncCall { name, args } => self.set_type_function_call(name, args),

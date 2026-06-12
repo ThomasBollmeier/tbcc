@@ -1,5 +1,9 @@
 use crate::ast::Statement::{For, IfStatement, Return, SwitchStatement};
-use crate::ast::{typed, Associativity, BinaryOp, Block, BlockItem, Declaration, Expression, ForInit, FunctionDeclaration, Label, Program, Statement, StorageClass, Type, TypedExpression, UnaryOp, VarDeclaration};
+use crate::ast::{
+    Associativity, BinaryOp, Block, BlockItem, Declaration, Expression, ForInit,
+    FunctionDeclaration, Label, Program, Statement, StorageClass, Type, TypedExpression, UnaryOp,
+    VarDeclaration, typed,
+};
 use crate::token::{Token, TokenStream, TokenType, TokenValue};
 use anyhow::{Result, anyhow};
 use std::collections::HashSet;
@@ -63,54 +67,68 @@ impl Parser {
 
     fn type_from_specifiers(specifiers: &HashSet<TokenType>) -> Result<Type> {
         if specifiers.contains(&TokenType::Long) {
-            Ok(Type::Long)
-        } else if specifiers.contains(&TokenType::Int) {
-            Ok(Type::Int)
+            if specifiers.contains(&TokenType::Unsigned) {
+                Ok(Type::ULong)
+            } else {
+                Ok(Type::Long)
+            }
         } else {
-            Err(anyhow!("Unexpected token type in specifiers"))
+            if specifiers.contains(&TokenType::Unsigned) {
+                Ok(Type::UInt)
+            } else {
+                Ok(Type::Int)
+            }
         }
     }
 
     fn specifiers(&self, stream: &mut TokenStream) -> Result<HashSet<TokenType>> {
-        let allowed_token_types: HashSet<TokenType> = HashSet::from_iter([
+        let type_token_types: HashSet<TokenType> = HashSet::from_iter([
             TokenType::Int,
             TokenType::Long,
-            TokenType::Extern,
-            TokenType::Static,
+            TokenType::Unsigned,
+            TokenType::Signed,
         ]);
+        let storage_token_types: HashSet<TokenType> =
+            HashSet::from_iter([TokenType::Extern, TokenType::Static]);
+        let allowed_token_types: HashSet<TokenType> = type_token_types
+            .union(&storage_token_types)
+            .cloned()
+            .collect();
         let specifiers = self.get_specifiers(stream, &allowed_token_types)?;
-        let num_specifiers = specifiers.len();
 
-        match num_specifiers {
-            1 => {
-                if specifiers.contains(&TokenType::Static)
-                    || specifiers.contains(&TokenType::Extern)
-                {
-                    return Err(anyhow!(
-                        "static or extern specifier cannot be specified without type"
-                    ));
-                }
-            }
-            2 | 3 => {
-                if specifiers.contains(&TokenType::Static)
-                    && specifiers.contains(&TokenType::Extern)
-                {
-                    return Err(anyhow!(
-                        "static specifier cannot be specified together with extern"
-                    ));
-                }
-            }
-            _ => return Err(anyhow!("expected 1 or 2 specifiers")),
+        if !specifiers.iter().any(|t| type_token_types.contains(t)) {
+            return Err(anyhow!("type specifier is missing"));
+        }
+
+        if specifiers.contains(&TokenType::Signed) && specifiers.contains(&TokenType::Unsigned) {
+            return Err(anyhow!(
+                "signed specifier cannot be specified together with unsigned"
+            ));
+        }
+
+        if specifiers.contains(&TokenType::Static) && specifiers.contains(&TokenType::Extern) {
+            return Err(anyhow!(
+                "static specifier cannot be specified together with extern"
+            ));
         }
 
         Ok(specifiers)
     }
 
     fn type_specifiers(&self, stream: &mut TokenStream) -> Result<HashSet<TokenType>> {
-        let allowed_token_types: HashSet<TokenType> =
-            HashSet::from_iter([TokenType::Int, TokenType::Long]);
+        let allowed_token_types: HashSet<TokenType> = HashSet::from_iter([
+            TokenType::Int,
+            TokenType::Long,
+            TokenType::Signed,
+            TokenType::Unsigned,
+        ]);
         let specifiers = self.get_specifiers(stream, &allowed_token_types)?;
 
+        if specifiers.contains(&TokenType::Signed) && specifiers.contains(&TokenType::Unsigned) {
+            return Err(anyhow!(
+                "signed specifier cannot be specified together with unsigned"
+            ));
+        }
         Ok(specifiers)
     }
 
@@ -230,7 +248,12 @@ impl Parser {
         while let Some(token) = stream.peek() {
             match token.token_type {
                 TokenType::RightBrace => break,
-                TokenType::Int | TokenType::Long | TokenType::Static | TokenType::Extern => {
+                TokenType::Int
+                | TokenType::Long
+                | TokenType::Unsigned
+                | TokenType::Signed
+                | TokenType::Static
+                | TokenType::Extern => {
                     let declaration = self.declaration(stream)?;
                     match declaration {
                         Declaration::FunctionDecl(func_decl) => {
@@ -484,9 +507,12 @@ impl Parser {
             .ok_or_else(|| anyhow!("Unexpected end of input in for-loop initializer"))?;
 
         let for_init = match token.token_type {
-            TokenType::Int | TokenType::Long | TokenType::Extern | TokenType::Static => {
-                self.for_init_declaration(stream)?
-            }
+            TokenType::Int
+            | TokenType::Long
+            | TokenType::Signed
+            | TokenType::Unsigned
+            | TokenType::Extern
+            | TokenType::Static => self.for_init_declaration(stream)?,
             TokenType::Semicolon => {
                 self.expect(stream, TokenType::Semicolon)?;
                 ForInit::InitExpression(None)
@@ -706,11 +732,25 @@ impl Parser {
                     return Err(anyhow!("Expected integer constant value"));
                 }
             }
+            TokenType::UnsignedIntegerConstant => {
+                if let Some(TokenValue::UnsignedInteger(value)) = token.value {
+                    typed(Expression::UnsignedIntegerConstant(value))
+                } else {
+                    return Err(anyhow!("Expected unsigned integer constant value"));
+                }
+            }
             TokenType::LongConstant => {
                 if let Some(TokenValue::Long(value)) = token.value {
                     typed(Expression::LongConstant(value))
                 } else {
                     return Err(anyhow!("Expected long integer constant value"));
+                }
+            }
+            TokenType::UnsignedLongConstant => {
+                if let Some(TokenValue::UnsignedLong(value)) = token.value {
+                    typed(Expression::UnsignedLongConstant(value))
+                } else {
+                    return Err(anyhow!("Expected unsigned long integer constant value"));
                 }
             }
             TokenType::Identifier => {
@@ -1276,6 +1316,30 @@ mod tests {
         "#;
 
         parse_code(code, true);
+    }
+
+    #[test]
+    fn parse_unsigned_variable() {
+        let code = r#"
+        int main(void) {
+            unsigned answer = 42;
+
+            return answer;
+        }
+        "#;
+
+        parse_code(code, true);
+    }
+
+    #[test]
+    fn parse_invalid_cast_to_unsigned_signed() {
+        let code = r#"
+        int main(void) {
+            return (unsigned signed) 42;
+        }
+        "#;
+
+        parse_code(code, false);
     }
 
     fn parse_code(code: &str, expect_success: bool) {

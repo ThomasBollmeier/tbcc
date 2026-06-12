@@ -208,7 +208,9 @@ fn walk_expression(expr: &mut Expression, walker: &mut impl WalkerMut) -> Result
 
     match expr {
         IntegerConstant(_) => {}
+        UnsignedIntegerConstant(_) => {}
         LongConstant(_) => {}
+        UnsignedLongConstant(_) => {}
         Cast {
             target_type: _,
             expr,

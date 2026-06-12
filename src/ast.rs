@@ -95,7 +95,9 @@ impl VarDeclaration {
 #[derive(Debug, Clone, PartialEq)]
 pub enum Type {
     Int,
+    UInt,
     Long,
+    ULong,
     Function {
         return_type: Box<Type>,
         param_types: Vec<Type>,
@@ -286,7 +288,9 @@ pub fn typed(expression: Expression) -> TypedExpression {
 #[derive(Debug, Clone)]
 pub enum Expression {
     IntegerConstant(i32),
+    UnsignedIntegerConstant(u32),
     LongConstant(i64),
+    UnsignedLongConstant(u64),
     Cast {
         expr: Box<TypedExpression>,
         target_type: Type,
