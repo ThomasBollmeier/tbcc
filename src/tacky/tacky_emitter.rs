@@ -63,8 +63,14 @@ impl TackyEmitter {
                         Some(InitialValue::Initialized(InitValue::Int(ival))) => {
                             IntegerConstant(*ival)
                         }
+                        Some(InitialValue::Initialized(InitValue::UInt(_uval))) => {
+                            todo!("Unsigned integer constants are not supported yet")
+                        }
                         Some(InitialValue::Initialized(InitValue::Long(lval))) => {
                             LongConstant(*lval)
+                        }
+                        Some(InitialValue::Initialized(InitValue::ULong(_ulval))) => {
+                            todo!("Unsigned long integer constants are not supported yet")
                         }
                         Some(InitialValue::Tentative) => match entry.c_type {
                             Type::Int => IntegerConstant(0),

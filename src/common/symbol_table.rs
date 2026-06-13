@@ -28,7 +28,9 @@ pub enum InitialValue {
 #[derive(Debug, Clone)]
 pub enum InitValue {
     Int(i32),
+    UInt(u32),
     Long(i64),
+    ULong(u64),
 }
 
 #[cfg(test)]

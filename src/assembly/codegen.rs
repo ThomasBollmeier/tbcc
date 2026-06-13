@@ -230,7 +230,9 @@ impl Visitor for CodeGenerator {
 
         let (value, is_quadword) = match static_var.value {
             InitValue::Int(i) => (i as i64, false),
+            InitValue::UInt(_u) => todo!("Unsigned integers are not supported yet"),
             InitValue::Long(l) => (l, true),
+            InitValue::ULong(_ul) => todo!("Unsigned long integers are not supported yet"),
         };
 
         if value != 0 {

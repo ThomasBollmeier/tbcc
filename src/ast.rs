@@ -105,6 +105,27 @@ pub enum Type {
     Undefined,
 }
 
+impl Type {
+    pub fn is_integer_type(&self) -> bool {
+        match self {
+            Type::Int | Type::UInt | Type::Long | Type::ULong => true,
+            _ => false,
+        }
+    }
+
+    pub fn get_int_size(&self) -> Option<usize> {
+        match self {
+            Type::Int | Type::UInt => Some(4),
+            Type::Long | Type::ULong => Some(8),
+            _ => None,
+        }
+    }
+
+    pub fn is_unsigned(&self) -> bool {
+        matches!(self, Type::UInt | Type::ULong)
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum StorageClass {
     Static,

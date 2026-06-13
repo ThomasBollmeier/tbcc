@@ -187,7 +187,13 @@ impl TypeChecker {
                 Expression::IntegerConstant(i) => {
                     Some(InitialValue::Initialized(InitValue::Int(*i)))
                 }
+                Expression::UnsignedIntegerConstant(u) => {
+                    Some(InitialValue::Initialized(InitValue::UInt(*u)))
+                }
                 Expression::LongConstant(l) => Some(InitialValue::Initialized(InitValue::Long(*l))),
+                Expression::UnsignedLongConstant(ul) => {
+                    Some(InitialValue::Initialized(InitValue::ULong(*ul)))
+                }
                 _ => {
                     return Err(anyhow!(
                         "Only integer constants are allowed as initializers for file-scope variables"
@@ -411,9 +417,23 @@ impl TypeChecker {
             return type_a.clone();
         }
 
-        match (type_a, type_b) {
-            (Type::Int, Type::Long) | (Type::Long, Type::Int) => Type::Long,
-            _ => Type::Undefined,
+        if !type_a.is_integer_type() || !type_b.is_integer_type() {
+            return Type::Undefined;
+        }
+
+        let size_a = type_a.get_int_size().unwrap();
+        let size_b = type_b.get_int_size().unwrap();
+
+        if size_a == size_b {
+            if type_a.is_unsigned() {
+                type_a.clone()
+            } else {
+                type_b.clone()
+            }
+        } else if size_a > size_b {
+            type_a.clone()
+        } else {
+            type_b.clone()
         }
     }
 
@@ -422,9 +442,9 @@ impl TypeChecker {
 
         match &typed_expr.0 {
             IntegerConstant(_) => self.set_type_integer_constant(typed_expr),
-            UnsignedIntegerConstant(_) => todo!("implement unsigned integer constant"),
+            UnsignedIntegerConstant(_) => self.set_type_uint_constant(typed_expr),
             LongConstant(_) => self.set_type_long_constant(typed_expr),
-            UnsignedLongConstant(_) => todo!("implement unsigned long constant"),
+            UnsignedLongConstant(_) => self.set_type_ulong_constant(typed_expr),
             Cast { expr, target_type } => self.set_type_cast(expr, target_type),
             Var(name) => self.set_type_var(name, typed_expr),
             FuncCall { name, args } => self.set_type_function_call(name, args),
@@ -638,9 +658,21 @@ impl TypeChecker {
         Ok(result)
     }
 
+    fn set_type_uint_constant(&self, typed_expr: &TypedExpression) -> Result<TypedExpression> {
+        let mut result = typed_expr.clone();
+        result.set_type(Type::UInt);
+        Ok(result)
+    }
+
     fn set_type_long_constant(&self, typed_expr: &TypedExpression) -> Result<TypedExpression> {
         let mut result = typed_expr.clone();
         result.set_type(Type::Long);
+        Ok(result)
+    }
+
+    fn set_type_ulong_constant(&self, typed_expr: &TypedExpression) -> Result<TypedExpression> {
+        let mut result = typed_expr.clone();
+        result.set_type(Type::ULong);
         Ok(result)
     }
 
