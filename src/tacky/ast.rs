@@ -32,6 +32,10 @@ pub enum Instruction {
         src: Value,
         dst: Value,
     },
+    ZeroExtend {
+        src: Value,
+        dst: Value,
+    },
     Truncate {
         src: Value,
         dst: Value,
@@ -73,7 +77,9 @@ pub enum Instruction {
 #[derive(Debug, Clone, PartialEq)]
 pub enum Value {
     IntegerConstant(i32),
+    UnsignedIntegerConstant(u32),
     LongConstant(i64),
+    UnsignedLongConstant(u64),
     Variable(String),
 }
 

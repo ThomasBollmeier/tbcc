@@ -1,10 +1,10 @@
+use crate::assembly::ast::AssemblyType::{Longword, Quadword};
 use crate::assembly::ast::Operand::Stack;
 use crate::assembly::ast::Register::{CX, DI, DX, R8, R9, SI};
 use crate::assembly::ast::{AssemblyType, ImmValue, StaticVar, TopLevel as TopLevelAsm};
 use crate::assembly::ast::{
     ConditionCode, FuncDef, Instruction, Operand, Program, Register, UnaryOp,
 };
-use crate::assembly::ast::AssemblyType::{Longword, Quadword};
 use crate::assembly::symbol_table::SymbolTableEntry as AsmSymbolTableEntry;
 use crate::common::symbol_table::SymbolTableEntry;
 use crate::common::symbol_table_generic::{SymbolTable, SymbolTableRef};
@@ -133,6 +133,12 @@ impl AssemblyCreator {
                 TackyInstruction::Return(value) => self.push_return(&mut ret, value),
                 TackyInstruction::SignExtend { src, dst } => {
                     self.push_sign_extend(&mut ret, src, dst);
+                }
+                TackyInstruction::ZeroExtend {
+                    src: _src,
+                    dst: _dst,
+                } => {
+                    todo!("zero extension is not currently supported")
                 }
                 TackyInstruction::Truncate { src, dst } => {
                     self.push_truncate(&mut ret, src, dst);
@@ -541,7 +547,9 @@ impl AssemblyCreator {
     fn create_operand(&mut self, value: &Value) -> Operand {
         match value {
             Value::IntegerConstant(i) => Operand::Immediate(ImmValue::Int(*i)),
+            Value::UnsignedIntegerConstant(_u) => todo!("implement unsigned integer constant"),
             Value::LongConstant(l) => Operand::Immediate(ImmValue::Long(*l)),
+            Value::UnsignedLongConstant(_ul) => todo!("implement unsigned long integer constant"),
             Value::Variable(name) => Operand::PseudoReg(name.clone()),
         }
     }
@@ -604,7 +612,9 @@ impl AssemblyCreator {
     fn get_asm_type(&self, value: &Value) -> AssemblyType {
         match value {
             Value::IntegerConstant(_) => Longword,
+            Value::UnsignedIntegerConstant(_) => Longword,
             Value::LongConstant(_) => Quadword,
+            Value::UnsignedLongConstant(_) => Quadword,
             Value::Variable(name) => self.lookup_asm_type(name),
         }
     }
@@ -686,7 +696,7 @@ mod tests {
             symbol_table.clone(),
             &mut program,
         )
-            .expect("Failed to validate program");
+        .expect("Failed to validate program");
 
         dbg!(&program);
 
@@ -1000,10 +1010,7 @@ mod tests {
                 dst: AsmOperand::Register(AsmRegister::AX)
             } if name == "tmp.2"
         ));
-        assert!(matches!(
-            &instructions[7],
-            AsmInstruction::Cdq(Longword)
-        ));
+        assert!(matches!(&instructions[7], AsmInstruction::Cdq(Longword)));
         assert!(matches!(
             &instructions[8],
             AsmInstruction::Idiv {
@@ -1028,10 +1035,7 @@ mod tests {
                 dst: AsmOperand::Register(AsmRegister::AX)
             } if name == "tmp.3"
         ));
-        assert!(matches!(
-            &instructions[11],
-            AsmInstruction::Cdq(Longword)
-        ));
+        assert!(matches!(&instructions[11], AsmInstruction::Cdq(Longword)));
         assert!(matches!(
             &instructions[12],
             AsmInstruction::Idiv {

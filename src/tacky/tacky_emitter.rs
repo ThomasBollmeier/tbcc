@@ -1,13 +1,15 @@
 use super::ast::Instruction::Unary;
-use super::ast::Value::{IntegerConstant, LongConstant};
+use super::ast::Value::{
+    IntegerConstant, LongConstant, UnsignedIntegerConstant, UnsignedLongConstant,
+};
 use super::ast::{BinaryOperator, Function, Instruction, Program, TopLevel, UnaryOperator, Value};
 use crate::ast::{
     BinaryOp, Block, BlockItem, Expression, ForInit, FunctionDeclaration, Label, Statement,
     StorageClass, TypedExpression, UnaryOp, VarDeclaration,
 };
+use crate::common::Type;
 use crate::common::symbol_table::{IdentAttrs, InitValue, InitialValue, SymbolTableEntry};
 use crate::common::symbol_table_generic::SymbolTableRef;
-use crate::common::{Type};
 use crate::semantic::NameGeneratorRef;
 use anyhow::{Result, anyhow};
 
@@ -60,21 +62,23 @@ impl TackyEmitter {
                     init_value,
                 } => {
                     let initial_value = match init_value {
-                        Some(InitialValue::Initialized(InitValue::Int(ival))) => {
-                            IntegerConstant(*ival)
+                        Some(InitialValue::Initialized(InitValue::Int(i_val))) => {
+                            IntegerConstant(*i_val)
                         }
-                        Some(InitialValue::Initialized(InitValue::UInt(_uval))) => {
-                            todo!("Unsigned integer constants are not supported yet")
+                        Some(InitialValue::Initialized(InitValue::UInt(u_val))) => {
+                            UnsignedIntegerConstant(*u_val)
                         }
-                        Some(InitialValue::Initialized(InitValue::Long(lval))) => {
-                            LongConstant(*lval)
+                        Some(InitialValue::Initialized(InitValue::Long(l_val))) => {
+                            LongConstant(*l_val)
                         }
-                        Some(InitialValue::Initialized(InitValue::ULong(_ulval))) => {
-                            todo!("Unsigned long integer constants are not supported yet")
+                        Some(InitialValue::Initialized(InitValue::ULong(ul_val))) => {
+                            UnsignedLongConstant(*ul_val)
                         }
                         Some(InitialValue::Tentative) => match entry.c_type {
                             Type::Int => IntegerConstant(0),
+                            Type::UInt => UnsignedIntegerConstant(0),
                             Type::Long => LongConstant(0),
+                            Type::ULong => UnsignedLongConstant(0),
                             _ => unreachable!(),
                         },
                         None => return None,
@@ -446,9 +450,11 @@ impl TackyEmitter {
         let expr_type = expr.get_type();
         match &expr.0 {
             Expression::IntegerConstant(value) => self.emit_integer_constant(*value),
-            Expression::UnsignedIntegerConstant(_value) => todo!("Unsigned integer constants are not supported yet"),
+            Expression::UnsignedIntegerConstant(_value) => {
+                self.emit_unsigned_integer_constant(*_value)
+            }
             Expression::LongConstant(value) => self.emit_long_constant(*value),
-            Expression::UnsignedLongConstant(_value) => todo!("Unsigned integer constants are not supported yet"),
+            Expression::UnsignedLongConstant(_value) => self.emit_unsigned_long_constant(*_value),
             Expression::UnaryExpr(op, expr) => {
                 self.emit_unary_expr(op, expr, &expr_type, instructions)
             }
@@ -494,19 +500,36 @@ impl TackyEmitter {
         instructions: &mut Vec<Instruction>,
     ) -> Value {
         let expr_value = self.emit_expression(expr, instructions);
-        if expr.get_type() == *target_type {
+        let expr_type = expr.get_type();
+        if expr_type == *target_type {
             return expr_value;
         }
 
         let result = self.make_temp_var(target_type);
+        let expr_size = expr_type
+            .get_int_size()
+            .expect("Only integer types should be casted in this emitter");
+        let target_size = target_type
+            .get_int_size()
+            .expect("Only integer types should be casted in this emitter");
 
-        if *target_type == Type::Long {
-            instructions.push(Instruction::SignExtend {
+        if expr_size == target_size {
+            instructions.push(Instruction::Copy {
+                src: expr_value,
+                dst: result.clone(),
+            });
+        } else if expr_size > target_size {
+            instructions.push(Instruction::Truncate {
+                src: expr_value,
+                dst: result.clone(),
+            });
+        } else if expr_type.is_unsigned() && target_type.is_unsigned() {
+            instructions.push(Instruction::ZeroExtend {
                 src: expr_value,
                 dst: result.clone(),
             });
         } else {
-            instructions.push(Instruction::Truncate {
+            instructions.push(Instruction::SignExtend {
                 src: expr_value,
                 dst: result.clone(),
             });
@@ -519,8 +542,16 @@ impl TackyEmitter {
         IntegerConstant(value)
     }
 
+    fn emit_unsigned_integer_constant(&self, value: u32) -> Value {
+        UnsignedIntegerConstant(value)
+    }
+
     fn emit_long_constant(&self, value: i64) -> Value {
         LongConstant(value)
+    }
+
+    fn emit_unsigned_long_constant(&self, value: u64) -> Value {
+        UnsignedLongConstant(value)
     }
 
     fn emit_var_expr(&self, name: &str) -> Value {
