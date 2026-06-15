@@ -1,4 +1,7 @@
-use crate::assembly::ast::{AssemblyType, BinaryOp, ConditionCode, FuncDef, Instruction, Operand, Program, Register, StaticVar, UnaryOp, Visitor};
+use crate::assembly::ast::{
+    AssemblyType, BinaryOp, ConditionCode, FuncDef, Instruction, Operand, Program, Register,
+    StaticVar, UnaryOp, Visitor,
+};
 use crate::assembly::symbol_table::SymbolTableEntry;
 use crate::common::InitValue;
 use crate::common::symbol_table_generic::SymbolTableRef;
@@ -129,6 +132,10 @@ impl CodeGenerator {
             ConditionCode::GtEq => "ge".to_string(),
             ConditionCode::Lt => "l".to_string(),
             ConditionCode::LtEq => "le".to_string(),
+            ConditionCode::A => todo!("{:?}", condition_code),
+            ConditionCode::AE => todo!("{:?}", condition_code),
+            ConditionCode::B => todo!("{:?}", condition_code),
+            ConditionCode::BE => todo!("{:?}", condition_code),
         }
     }
 
@@ -265,7 +272,11 @@ impl Visitor for CodeGenerator {
 
     fn visit_instruction(&mut self, instruction: &Instruction) {
         match instruction {
-            Instruction::Mov { assembly_type, src  , dst} => {
+            Instruction::Mov {
+                assembly_type,
+                src,
+                dst,
+            } => {
                 let suffix = self.get_instruction_suffix(assembly_type);
                 let src = self.operand_to_string(src, assembly_type);
                 let dst = self.operand_to_string(dst, assembly_type);
@@ -276,34 +287,56 @@ impl Visitor for CodeGenerator {
                 let dst_str = self.operand_8byte_to_string(dst);
                 self.write_instruction(&format!("movslq \t{src_str}, {dst_str}"));
             }
+            Instruction::MovZeroExtend {
+                src: _src,
+                dst: _dst,
+            } => todo!("implement"),
             Instruction::Ret => {
                 self.write_instruction("movq \t%rbp, %rsp");
                 self.write_instruction("popq \t%rbp");
                 self.write_instruction("ret");
             }
-            Instruction::Unary { assembly_type, op, operand} => {
+            Instruction::Unary {
+                assembly_type,
+                op,
+                operand,
+            } => {
                 let op_str = self.unary_op_to_string(op, assembly_type);
                 let operand_str = self.operand_to_string(operand, assembly_type);
                 self.write_instruction(&format!("{op_str} \t{operand_str}"));
             }
             Instruction::Binary {
-                op, left, right, assembly_type,
+                op,
+                left,
+                right,
+                assembly_type,
             } => {
                 let op_str = self.binary_op_to_string(op, assembly_type);
                 let left_str = self.operand_to_string(left, assembly_type);
                 let right_str = self.operand_to_string(right, assembly_type);
                 self.write_instruction(&format!("{op_str} \t{left_str}, {right_str}"));
             }
-            Instruction::Idiv { operand, assembly_type } => {
+            Instruction::Idiv {
+                operand,
+                assembly_type,
+            } => {
                 let suffix = self.get_instruction_suffix(assembly_type);
                 let operand_str = self.operand_to_string(operand, assembly_type);
                 self.write_instruction(&format!("idiv{suffix} \t{operand_str}"));
             }
-            Instruction::Cdq(assembly_type ) => match assembly_type {
+            Instruction::Div {
+                operand: _,
+                assembly_type: _,
+            } => todo!("Unsigned division is not supported yet"),
+            Instruction::Cdq(assembly_type) => match assembly_type {
                 AssemblyType::Longword => self.write_instruction("cdq"),
                 AssemblyType::Quadword => self.write_instruction("cqo"),
             },
-            Instruction::Cmp { op1, op2, assembly_type } => {
+            Instruction::Cmp {
+                op1,
+                op2,
+                assembly_type,
+            } => {
                 let suffix = self.get_instruction_suffix(assembly_type);
                 let op1_str = self.operand_to_string(op1, assembly_type);
                 let op2_str = self.operand_to_string(op2, assembly_type);

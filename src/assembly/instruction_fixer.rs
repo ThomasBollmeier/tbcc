@@ -34,18 +34,16 @@ impl InstructionFixer {
     ) {
         use crate::assembly::ast::{Instruction::Mov, Operand::Register, Register::R10};
 
-        let src_is_long = if let Immediate(ImmValue::Long(_)) = src {
-            true
-        } else {
-            false
+        let src_is_long = match src {
+            Immediate(ImmValue::Long(_)) | Immediate(ImmValue::ULong(_)) => true,
+            _ => false,
         };
 
         if Self::all_memory(&[src, dst]) || src_is_long {
             let src = if *assembly_type == Longword && src_is_long {
                 match src {
-                    Immediate(ImmValue::Long(l)) => {
-                        Immediate(ImmValue::Int(*l as i32))
-                    }
+                    Immediate(ImmValue::Long(l)) => Immediate(ImmValue::Int(*l as i32)),
+                    Immediate(ImmValue::ULong(ul)) => Immediate(ImmValue::UInt(*ul as u32)),
                     _ => unreachable!(),
                 }
             } else {
@@ -72,7 +70,7 @@ impl InstructionFixer {
         dst: &Operand,
         new_instructions: &mut Vec<Instruction>,
     ) {
-        if let Operand::Immediate(_) = src {
+        if let Immediate(_) = src {
             new_instructions.push(Mov {
                 assembly_type: Longword,
                 src: src.clone(),
@@ -109,6 +107,35 @@ impl InstructionFixer {
         }
     }
 
+    fn handle_mov_zero_extend(
+        &self,
+        instruction: &Instruction,
+        src: &Operand,
+        dst: &Operand,
+        new_instructions: &mut Vec<Instruction>,
+    ) {
+        if let Register(_) = dst {
+            new_instructions.push(Mov {
+                assembly_type: Longword,
+                src: src.clone(),
+                dst: dst.clone(),
+            });
+        } else if Self::is_memory(dst) {
+            new_instructions.push(Mov {
+                assembly_type: Longword,
+                src: src.clone(),
+                dst: Register(R11),
+            });
+            new_instructions.push(Mov {
+                assembly_type: Quadword,
+                src: Register(R11),
+                dst: dst.clone(),
+            });
+        } else {
+            new_instructions.push(instruction.clone());
+        }
+    }
+
     fn handle_binary(
         &self,
         instruction: &Instruction,
@@ -127,7 +154,7 @@ impl InstructionFixer {
 
         let (left, replaced) = match op {
             ShiftLeft | ShiftRight => (left.clone(), false),
-            _ => Self::replace_long_src_operand(assembly_type, left, new_instructions)
+            _ => Self::replace_long_src_operand(assembly_type, left, new_instructions),
         };
 
         match op {
@@ -235,16 +262,17 @@ impl InstructionFixer {
         }
     }
 
-    fn handle_idiv(
+    fn handle_idiv_or_div(
         &self,
         instruction: &Instruction,
         assembly_type: &AssemblyType,
         operand: &Operand,
+        is_unsigned: bool,
         new_instructions: &mut Vec<Instruction>,
     ) {
         use crate::assembly::ast::{
-            Instruction::Idiv, Instruction::Mov, Operand::Immediate, Operand::Register,
-            Register::R10,
+            Instruction::Div, Instruction::Idiv, Instruction::Mov, Operand::Immediate,
+            Operand::Register, Register::R10,
         };
 
         match operand {
@@ -254,10 +282,17 @@ impl InstructionFixer {
                     src: operand.clone(),
                     dst: Register(R10),
                 });
-                new_instructions.push(Idiv {
-                    assembly_type: assembly_type.clone(),
-                    operand: Register(R10),
-                });
+                if is_unsigned {
+                    new_instructions.push(Div {
+                        assembly_type: assembly_type.clone(),
+                        operand: Register(R10),
+                    });
+                } else {
+                    new_instructions.push(Idiv {
+                        assembly_type: assembly_type.clone(),
+                        operand: Register(R10),
+                    });
+                }
             }
             _ => new_instructions.push(instruction.clone()),
         }
@@ -365,6 +400,9 @@ impl VisitorMut for InstructionFixer {
                 MovSx { src, dst } => {
                     self.handle_movsx(instruction, src, dst, &mut new_instructions);
                 }
+                MovZeroExtend { src, dst } => {
+                    self.handle_mov_zero_extend(instruction, src, dst, &mut new_instructions);
+                }
                 Binary {
                     assembly_type,
                     op,
@@ -382,7 +420,25 @@ impl VisitorMut for InstructionFixer {
                     assembly_type,
                     operand,
                 } => {
-                    self.handle_idiv(instruction, assembly_type, operand, &mut new_instructions);
+                    self.handle_idiv_or_div(
+                        instruction,
+                        assembly_type,
+                        operand,
+                        false,
+                        &mut new_instructions,
+                    );
+                }
+                Div {
+                    assembly_type,
+                    operand,
+                } => {
+                    self.handle_idiv_or_div(
+                        instruction,
+                        assembly_type,
+                        operand,
+                        true,
+                        &mut new_instructions,
+                    );
                 }
                 Cmp {
                     assembly_type,

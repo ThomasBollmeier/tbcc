@@ -105,6 +105,14 @@ impl VisitorMut for PseudoRegReplacer {
                     *dst = new_dst;
                 }
             }
+            MovZeroExtend { src, dst, .. } => {
+                if let Some(new_src) = self.replace_operand(src) {
+                    *src = new_src;
+                }
+                if let Some(new_dst) = self.replace_operand(dst) {
+                    *dst = new_dst;
+                }
+            }
             Unary { operand, .. } => {
                 if let Some(new_operand) = self.replace_operand(operand) {
                     *operand = new_operand;
@@ -119,6 +127,11 @@ impl VisitorMut for PseudoRegReplacer {
                 }
             }
             Idiv { operand, .. } => {
+                if let Some(new_operand) = self.replace_operand(operand) {
+                    *operand = new_operand;
+                }
+            }
+            Div { operand, .. } => {
                 if let Some(new_operand) = self.replace_operand(operand) {
                     *operand = new_operand;
                 }

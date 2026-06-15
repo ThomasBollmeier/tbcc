@@ -1,4 +1,5 @@
 use crate::assembly::ast::AssemblyType::{Longword, Quadword};
+use crate::assembly::ast::Instruction::{Cdq, Idiv};
 use crate::assembly::ast::Operand::Stack;
 use crate::assembly::ast::Register::{CX, DI, DX, R8, R9, SI};
 use crate::assembly::ast::{AssemblyType, ImmValue, StaticVar, TopLevel as TopLevelAsm};
@@ -82,7 +83,9 @@ impl AssemblyCreator {
     fn create_static_var(&mut self, static_var: &StaticVariable) -> anyhow::Result<StaticVar> {
         let (value, alignment) = match static_var.initial_value {
             Value::IntegerConstant(i) => (InitValue::Int(i), 4),
+            Value::UnsignedIntegerConstant(u) => (InitValue::UInt(u), 4),
             Value::LongConstant(l) => (InitValue::Long(l), 8),
+            Value::UnsignedLongConstant(ul) => (InitValue::ULong(ul), 8),
             _ => return Err(anyhow::anyhow!("Not a valid constant.")),
         };
 
@@ -134,11 +137,8 @@ impl AssemblyCreator {
                 TackyInstruction::SignExtend { src, dst } => {
                     self.push_sign_extend(&mut ret, src, dst);
                 }
-                TackyInstruction::ZeroExtend {
-                    src: _src,
-                    dst: _dst,
-                } => {
-                    todo!("zero extension is not currently supported")
+                TackyInstruction::ZeroExtend { src, dst } => {
+                    self.push_zero_extend(&mut ret, src, dst)
                 }
                 TackyInstruction::Truncate { src, dst } => {
                     self.push_truncate(&mut ret, src, dst);
@@ -296,6 +296,15 @@ impl AssemblyCreator {
         });
     }
 
+    fn push_zero_extend(&mut self, instructions: &mut Vec<Instruction>, src: &Value, dst: &Value) {
+        let src_op = self.create_operand(src);
+        let dst_op = self.create_operand(dst);
+        instructions.push(Instruction::MovZeroExtend {
+            src: src_op,
+            dst: dst_op,
+        });
+    }
+
     fn push_truncate(&mut self, instructions: &mut Vec<Instruction>, src: &Value, dst: &Value) {
         let src_op = self.create_operand(src);
         let dst_op = self.create_operand(dst);
@@ -369,16 +378,45 @@ impl AssemblyCreator {
             src: src1_op,
             dst: Operand::Register(Register::AX),
         });
-        instructions.push(Cdq(assembly_type.clone()));
-        instructions.push(Idiv {
-            assembly_type: assembly_type.clone(),
-            operand: src2_op,
-        });
+
+        self.push_div(instructions, &assembly_type, src1, &src2_op);
+
         instructions.push(Mov {
             assembly_type,
             src: Operand::Register(Register::AX),
             dst: dst_op,
         });
+    }
+
+    fn push_div(
+        &mut self,
+        instructions: &mut Vec<Instruction>,
+        assembly_type: &AssemblyType,
+        src1: &Value,
+        src2_op: &Operand,
+    ) {
+        if self.is_value_unsigned(src1) {
+            let zero_op = if *assembly_type == Longword {
+                Operand::Immediate(ImmValue::UInt(0))
+            } else {
+                Operand::Immediate(ImmValue::ULong(0))
+            };
+            instructions.push(Instruction::Mov {
+                assembly_type: assembly_type.clone(),
+                src: zero_op,
+                dst: Operand::Register(DX),
+            });
+            instructions.push(Instruction::Div {
+                assembly_type: assembly_type.clone(),
+                operand: src2_op.clone(),
+            });
+        } else {
+            instructions.push(Cdq(assembly_type.clone()));
+            instructions.push(Idiv {
+                assembly_type: assembly_type.clone(),
+                operand: src2_op.clone(),
+            });
+        }
     }
 
     fn push_binary_remainder(
@@ -400,11 +438,9 @@ impl AssemblyCreator {
             src: src1_op,
             dst: Operand::Register(Register::AX),
         });
-        instructions.push(Cdq(assembly_type.clone()));
-        instructions.push(Idiv {
-            assembly_type: assembly_type.clone(),
-            operand: src2_op,
-        });
+
+        self.push_div(instructions, &assembly_type, src1, &src2_op);
+
         instructions.push(Mov {
             assembly_type,
             src: Operand::Register(DX),
@@ -452,7 +488,8 @@ impl AssemblyCreator {
             op1: src2_op,
             op2: src1_op,
         });
-        let condition_code = self.map_relational_operator(op);
+        let is_unsigned = self.is_value_unsigned(src1);
+        let condition_code = self.map_relational_operator(op, is_unsigned);
         instructions.push(Mov {
             assembly_type: self.get_asm_type(dst),
             src: Operand::Immediate(ImmValue::Int(0)),
@@ -547,9 +584,9 @@ impl AssemblyCreator {
     fn create_operand(&mut self, value: &Value) -> Operand {
         match value {
             Value::IntegerConstant(i) => Operand::Immediate(ImmValue::Int(*i)),
-            Value::UnsignedIntegerConstant(_u) => todo!("implement unsigned integer constant"),
+            Value::UnsignedIntegerConstant(u) => Operand::Immediate(ImmValue::UInt(*u)),
             Value::LongConstant(l) => Operand::Immediate(ImmValue::Long(*l)),
-            Value::UnsignedLongConstant(_ul) => todo!("implement unsigned long integer constant"),
+            Value::UnsignedLongConstant(ul) => Operand::Immediate(ImmValue::ULong(*ul)),
             Value::Variable(name) => Operand::PseudoReg(name.clone()),
         }
     }
@@ -580,24 +617,40 @@ impl AssemblyCreator {
         }
     }
 
-    fn map_relational_operator(&self, relational_op: &TackyBinOp) -> ConditionCode {
+    fn map_relational_operator(
+        &self,
+        relational_op: &TackyBinOp,
+        is_unsigned: bool,
+    ) -> ConditionCode {
         use crate::tacky::ast::BinaryOperator::*;
-        match relational_op {
-            Equal => ConditionCode::Eq,
-            NotEqual => ConditionCode::NotEq,
-            Greater => ConditionCode::Gt,
-            GreaterEqual => ConditionCode::GtEq,
-            Less => ConditionCode::Lt,
-            LessEqual => ConditionCode::LtEq,
-            _ => unimplemented!("unsupported relational operator {:?}", relational_op),
+        if is_unsigned {
+            match relational_op {
+                Equal => ConditionCode::Eq,
+                NotEqual => ConditionCode::NotEq,
+                Greater => ConditionCode::A,
+                GreaterEqual => ConditionCode::AE,
+                Less => ConditionCode::B,
+                LessEqual => ConditionCode::BE,
+                _ => unimplemented!("unsupported relational operator {:?}", relational_op),
+            }
+        } else {
+            match relational_op {
+                Equal => ConditionCode::Eq,
+                NotEqual => ConditionCode::NotEq,
+                Greater => ConditionCode::Gt,
+                GreaterEqual => ConditionCode::GtEq,
+                Less => ConditionCode::Lt,
+                LessEqual => ConditionCode::LtEq,
+                _ => unimplemented!("unsupported relational operator {:?}", relational_op),
+            }
         }
     }
 
     fn map_type_to_asm_type(c_type: &Type) -> AssemblyType {
         use crate::common::Type::*;
         match c_type {
-            Int => Longword,
-            Long => Quadword,
+            Int | UInt => Longword,
+            Long | ULong => Quadword,
             _ => unimplemented!("unsupported type {:?}", c_type),
         }
     }
@@ -634,6 +687,17 @@ impl AssemblyCreator {
             op: crate::assembly::ast::BinaryOp::Add,
             left: Operand::Immediate(ImmValue::Int(bytes)),
             right: Operand::Register(Register::SP),
+        }
+    }
+
+    fn is_value_unsigned(&self, value: &Value) -> bool {
+        match value {
+            Value::UnsignedIntegerConstant(_) | Value::UnsignedLongConstant(_) => true,
+            Value::IntegerConstant(_) | Value::LongConstant(_) => false,
+            Value::Variable(name) => match self.symbol_table.borrow().get_entry(name) {
+                Some(entry) => matches!(entry.c_type, Type::UInt | Type::ULong),
+                None => panic!("Symbol not found: {}", name),
+            },
         }
     }
 }

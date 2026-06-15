@@ -120,6 +120,10 @@ pub enum Instruction {
         src: Operand,
         dst: Operand,
     },
+    MovZeroExtend {
+        src: Operand,
+        dst: Operand,
+    },
     Unary {
         op: UnaryOp,
         assembly_type: AssemblyType,
@@ -137,6 +141,10 @@ pub enum Instruction {
         op2: Operand,
     },
     Idiv {
+        assembly_type: AssemblyType,
+        operand: Operand,
+    },
+    Div {
         assembly_type: AssemblyType,
         operand: Operand,
     },
@@ -158,6 +166,10 @@ pub enum ConditionCode {
     GtEq,
     Lt,
     LtEq,
+    A,
+    AE,
+    B,
+    BE
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -172,14 +184,18 @@ pub enum Operand {
 #[derive(Debug, Clone, PartialEq)]
 pub enum ImmValue {
     Int(i32),
+    UInt(u32),
     Long(i64),
+    ULong(u64),
 }
 
 impl Display for ImmValue {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             ImmValue::Int(i) => write!(f, "{}", i),
+            ImmValue::UInt(u) => write!(f, "{}", u),
             ImmValue::Long(i) => write!(f, "{}", i),
+            ImmValue::ULong(u) => write!(f, "{}", u),
         }
     }
 }
