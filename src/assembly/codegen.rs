@@ -132,10 +132,10 @@ impl CodeGenerator {
             ConditionCode::GtEq => "ge".to_string(),
             ConditionCode::Lt => "l".to_string(),
             ConditionCode::LtEq => "le".to_string(),
-            ConditionCode::A => todo!("{:?}", condition_code),
-            ConditionCode::AE => todo!("{:?}", condition_code),
-            ConditionCode::B => todo!("{:?}", condition_code),
-            ConditionCode::BE => todo!("{:?}", condition_code),
+            ConditionCode::A => "a".to_string(),
+            ConditionCode::AE => "ae".to_string(),
+            ConditionCode::B => "b".to_string(),
+            ConditionCode::BE => "be".to_string(),
         }
     }
 
@@ -237,9 +237,9 @@ impl Visitor for CodeGenerator {
 
         let (value, is_quadword) = match static_var.value {
             InitValue::Int(i) => (i as i64, false),
-            InitValue::UInt(_u) => todo!("Unsigned integers are not supported yet"),
+            InitValue::UInt(u) => (u as i64, false) ,
             InitValue::Long(l) => (l, true),
-            InitValue::ULong(_ul) => todo!("Unsigned long integers are not supported yet"),
+            InitValue::ULong(ul) => (ul as i64, true),
         };
 
         if value != 0 {
@@ -288,9 +288,9 @@ impl Visitor for CodeGenerator {
                 self.write_instruction(&format!("movslq \t{src_str}, {dst_str}"));
             }
             Instruction::MovZeroExtend {
-                src: _src,
-                dst: _dst,
-            } => todo!("implement"),
+                src: _,
+                dst: _,
+            } => unreachable!("cannot be reached"),
             Instruction::Ret => {
                 self.write_instruction("movq \t%rbp, %rsp");
                 self.write_instruction("popq \t%rbp");
@@ -325,9 +325,13 @@ impl Visitor for CodeGenerator {
                 self.write_instruction(&format!("idiv{suffix} \t{operand_str}"));
             }
             Instruction::Div {
-                operand: _,
-                assembly_type: _,
-            } => todo!("Unsigned division is not supported yet"),
+                operand,
+                assembly_type,
+            } => {
+                let suffix = self.get_instruction_suffix(assembly_type);
+                let operand_str = self.operand_to_string(operand, assembly_type);
+                self.write_instruction(&format!("div{suffix} \t{operand_str}"));
+            }
             Instruction::Cdq(assembly_type) => match assembly_type {
                 AssemblyType::Longword => self.write_instruction("cdq"),
                 AssemblyType::Quadword => self.write_instruction("cqo"),
@@ -449,6 +453,72 @@ mod tests {
             int main(void) {
                 return foo() + bar() + foo() + bar();
             }
+        "#;
+
+        let (assembly_program, asm_symbol_table) = create_assembly(code);
+        let code_generator = CodeGenerator::new(asm_symbol_table);
+        let asm_code = code_generator.generate_assembly(&assembly_program);
+
+        print!("{asm_code}");
+    }
+
+    #[test]
+    fn generate_asm_with_global_unsigned_long() {
+        let code = r#"
+        unsigned long answer = 42;
+
+        int main(void) {
+            if (answer != 42ul) {
+                return 1;
+            }
+            return 0;
+        }
+        "#;
+
+        let (assembly_program, asm_symbol_table) = create_assembly(code);
+        let code_generator = CodeGenerator::new(asm_symbol_table);
+        let asm_code = code_generator.generate_assembly(&assembly_program);
+
+        print!("{asm_code}");
+    }
+
+    #[test]
+    fn generate_asm_with_implicit_cast() {
+        let code = r#"
+        int compare(long a, long b) {
+            return a == b;
+        }
+
+        int main(void) {
+            return compare(2147483658u, 2147483658l);
+        }
+        "#;
+
+        let (assembly_program, asm_symbol_table) = create_assembly(code);
+        let code_generator = CodeGenerator::new(asm_symbol_table);
+        let asm_code = code_generator.generate_assembly(&assembly_program);
+
+        print!("{asm_code}");
+    }
+
+    #[test]
+    fn generate_asm_with_unsigned_args() {
+        let code = r#"
+        int accept_unsigned(
+            unsigned int a,
+            unsigned int b,
+            unsigned long c,
+            unsigned long d,
+            unsigned int e,
+            unsigned int f,
+            unsigned long g,
+            unsigned int h,
+            unsigned long i);
+
+        int main(void) {
+            return accept_unsigned(1, -1, -1, 9223372036854775808ul, 2147483648ul, 0, 123456,
+                2147487744u, 9223372041149743104ul);
+        }
         "#;
 
         let (assembly_program, asm_symbol_table) = create_assembly(code);

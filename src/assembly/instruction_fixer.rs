@@ -250,15 +250,16 @@ impl InstructionFixer {
         instructions: &mut Vec<Instruction>,
     ) -> (Operand, bool) {
         use crate::assembly::ast::{Instruction::Mov, Operand::Register, Register::R10};
-        if let Immediate(ImmValue::Long(_)) = left {
-            instructions.push(Mov {
-                assembly_type: assembly_type.clone(),
-                src: left.clone(),
-                dst: Register(R10),
-            });
-            (Register(R10), true)
-        } else {
-            (left.clone(), false)
+        match left {
+            Immediate(ImmValue::Long(_)) | Immediate(ImmValue::ULong(_)) => {
+                instructions.push(Mov {
+                    assembly_type: assembly_type.clone(),
+                    src: left.clone(),
+                    dst: Register(R10),
+                });
+                (Register(R10), true)
+            }
+            _ => (left.clone(), false),
         }
     }
 
@@ -356,14 +357,16 @@ impl InstructionFixer {
         }
     }
 
-    fn handle_puah(
+    fn handle_push(
         &self,
         instruction: &Instruction,
         operand: &Operand,
         instructions: &mut Vec<Instruction>,
     ) {
         match operand {
-            Immediate(ImmValue::Long(_)) => {
+            Immediate(ImmValue::UInt(_))
+            | Immediate(ImmValue::Long(_))
+            | Immediate(ImmValue::ULong(_)) => {
                 instructions.push(Mov {
                     assembly_type: Quadword,
                     src: operand.clone(),
@@ -445,7 +448,7 @@ impl VisitorMut for InstructionFixer {
                     op1,
                     op2,
                 } => self.handle_cmp(instruction, assembly_type, op1, op2, &mut new_instructions),
-                Push(operand) => self.handle_puah(instruction, operand, &mut new_instructions),
+                Push(operand) => self.handle_push(instruction, operand, &mut new_instructions),
                 _ => new_instructions.push(instruction.clone()),
             }
         }

@@ -69,28 +69,60 @@ impl LoopLabeler {
                         }
                         case_values.insert(val);
                     }
+                    Expression::UnsignedIntegerConstant(value) => {
+                        let val = *value as i64;
+                        if case_values.contains(&val) {
+                            return Err(anyhow::anyhow!("case arm value is already used"));
+                        }
+                        case_values.insert(val);
+                    }
                     Expression::LongConstant(value) => {
                         if case_values.contains(&value) {
                             return Err(anyhow::anyhow!("case arm value is already used"));
                         }
                         case_values.insert(*value);
                     }
+                    Expression::UnsignedLongConstant(value) => {
+                        let val = *value as i64;
+                        if case_values.contains(&val) {
+                            return Err(anyhow::anyhow!("case arm value is already used"));
+                        }
+                        case_values.insert(val);
+                    }
                     Expression::Cast {
                         expr: inner_expr,
                         target_type,
                     } => {
                         let case_val = match inner_expr.0 {
-                            Expression::IntegerConstant(value) => {
-                                value as i64
-                            }
-                            Expression::LongConstant(value) => {
-                                if *target_type == Type::Int {
-                                    (value as i32) as i64
-                                } else {
-                                    value
+                            Expression::IntegerConstant(value) => value as i64,
+                            Expression::UnsignedIntegerConstant(value) => value as i64,
+                            Expression::LongConstant(value) => match *target_type {
+                                Type::Int => (value as i32) as i64,
+                                Type::UInt => (value as u32) as i64,
+                                Type::Long => value,
+                                Type::ULong => (value as u64) as i64,
+                                _ => {
+                                    return Err(anyhow::anyhow!(
+                                        "case arm expression is not an integer"
+                                    ));
+                                }
+                            },
+                            Expression::UnsignedLongConstant(value) => match *target_type {
+                                Type::Int => (value as i32) as i64,
+                                Type::UInt => (value as u32) as i64,
+                                Type::Long => value as i64,
+                                Type::ULong => value as i64,
+                                _ => {
+                                    return Err(anyhow::anyhow!(
+                                        "case arm expression is not an integer"
+                                    ));
                                 }
                             }
-                            _ => return Err(anyhow::anyhow!("case arm expression is not an integer")),
+                            _ => {
+                                return Err(anyhow::anyhow!(
+                                    "case arm expression is not an integer"
+                                ));
+                            }
                         };
 
                         if case_values.contains(&case_val) {
@@ -182,17 +214,23 @@ enum TargetId {
 
 #[cfg(test)]
 mod tests {
-    use anyhow::anyhow;
     use super::*;
-    use crate::ast::{typed, Block, BlockItem, Declaration, Expression, FunctionDeclaration, Label, Program, Statement, Type};
+    use crate::ast::{
+        Block, BlockItem, Declaration, Expression, FunctionDeclaration, Label, Program, Statement,
+        Type, typed,
+    };
+    use crate::common::symbol_table_generic::SymbolTable;
     use crate::lexer::Lexer;
     use crate::parser::Parser;
+    use crate::semantic::type_checker;
+    use anyhow::anyhow;
 
     fn get_main_func(program: &Program) -> Result<&FunctionDeclaration> {
         if let Declaration::FunctionDecl(func_decl) = program
             .decls
             .get(0)
-            .ok_or_else(|| anyhow!("No function declaration"))? {
+            .ok_or_else(|| anyhow!("No function declaration"))?
+        {
             Ok(func_decl)
         } else {
             Err(anyhow!("No function declaration"))
@@ -244,7 +282,10 @@ mod tests {
             .expect("Expected loop labeler to succeed");
 
         let main_func = get_main_func(&program).expect("Expected main function to be present");
-        let body = main_func.body.as_ref().expect("Expected main function to have a body");
+        let body = main_func
+            .body
+            .as_ref()
+            .expect("Expected main function to have a body");
 
         match &body.items[0] {
             BlockItem::Statement(Statement::While { loop_id, body, .. }) => {
@@ -306,7 +347,10 @@ mod tests {
             .expect("Expected loop labeler to succeed");
 
         let main_func = get_main_func(&program).expect("Expected main function to be present");
-        let body = main_func.body.as_ref().expect("Expected main function to have a body");
+        let body = main_func
+            .body
+            .as_ref()
+            .expect("Expected main function to have a body");
 
         match &body.items[0] {
             BlockItem::Statement(Statement::While { loop_id, body, .. }) => {
@@ -403,7 +447,10 @@ mod tests {
             .expect("Expected loop labeler to succeed");
 
         let main_func = get_main_func(&program).expect("Expected main function to be present");
-        let body = main_func.body.as_ref().expect("Expected main function to have a body");
+        let body = main_func
+            .body
+            .as_ref()
+            .expect("Expected main function to have a body");
 
         match &body.items[0] {
             BlockItem::Statement(Statement::SwitchStatement {
@@ -518,6 +565,36 @@ mod tests {
         }
     }
 
+    #[test]
+    fn find_duplicate_labels_due_to_cast() {
+        let code = r#"
+        int main(void) {
+            unsigned int ui = 10u;
+            switch(ui) {
+                case 4294967295u: // 2^32 - 1
+                    return 0;
+                case 1099511627775l: // 0x0000_00ff_ffff_ffff; this will be converted to 2^32 - 1
+                    return 1;
+                default: return 2;
+            }
+        }
+        "#;
+
+        let mut program = parse_code(code).expect("Expected code to parse");
+
+        let symbol_table = SymbolTable::new_ref();
+        let mut type_checker = type_checker::TypeChecker::new(symbol_table.clone());
+        type_checker
+            .check(&mut program)
+            .expect("Expected type checking to succeed");
+
+        let mut labeler = LoopLabeler::new();
+        match labeler.label_loops(&mut program) {
+            Ok(_) => panic!("Expected label loops to fail"),
+            Err(_) => {}
+        }
+    }
+
     fn parse_code(code: &str) -> Result<Program> {
         let parser = Parser::new();
         let lexer = Lexer::new();
@@ -528,13 +605,15 @@ mod tests {
 
     fn program_with_statement(statement: Statement) -> Program {
         let mut program = Program::new();
-        program.decls.push(Declaration::FunctionDecl(FunctionDeclaration::new(
-            "main".to_string(),
-            vec![],
-            Some(Block::new(vec![BlockItem::Statement(statement)])),
-            None,
-            Type::Int,
-        )));
+        program
+            .decls
+            .push(Declaration::FunctionDecl(FunctionDeclaration::new(
+                "main".to_string(),
+                vec![],
+                Some(Block::new(vec![BlockItem::Statement(statement)])),
+                None,
+                Type::Int,
+            )));
         program
     }
 

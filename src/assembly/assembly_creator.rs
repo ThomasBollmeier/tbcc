@@ -14,6 +14,7 @@ use crate::tacky::ast::{
     BinaryOperator as TackyBinOp, BinaryOperator, Function, Instruction as TackyInstruction,
     StaticVariable, TopLevel, UnaryOperator, Value,
 };
+use anyhow::{anyhow, Result};
 
 #[derive(Debug)]
 pub struct AssemblyCreator {
@@ -32,7 +33,7 @@ impl AssemblyCreator {
     pub fn create_program(
         &mut self,
         tacky_program: &crate::tacky::ast::Program,
-    ) -> anyhow::Result<(Program, SymbolTableRef<AsmSymbolTableEntry>)> {
+    ) -> Result<(Program, SymbolTableRef<AsmSymbolTableEntry>)> {
         let mut top_levels_asm = vec![];
         for top_level in &tacky_program.0 {
             match top_level {
@@ -80,13 +81,11 @@ impl AssemblyCreator {
         asm_symbol_table
     }
 
-    fn create_static_var(&mut self, static_var: &StaticVariable) -> anyhow::Result<StaticVar> {
-        let (value, alignment) = match static_var.initial_value {
-            Value::IntegerConstant(i) => (InitValue::Int(i), 4),
-            Value::UnsignedIntegerConstant(u) => (InitValue::UInt(u), 4),
-            Value::LongConstant(l) => (InitValue::Long(l), 8),
-            Value::UnsignedLongConstant(ul) => (InitValue::ULong(ul), 8),
-            _ => return Err(anyhow::anyhow!("Not a valid constant.")),
+    fn create_static_var(&mut self, static_var: &StaticVariable) -> Result<StaticVar> {
+        let value = self.determine_static_var_value(static_var)?;
+        let alignment = match value {
+            InitValue::Int(_) | InitValue::UInt(_) => 4,
+            InitValue::Long(_) | InitValue::ULong(_) => 8,
         };
 
         Ok(StaticVar {
@@ -97,7 +96,41 @@ impl AssemblyCreator {
         })
     }
 
-    fn create_func_def(&mut self, func_def: &Function) -> anyhow::Result<FuncDef> {
+    fn determine_static_var_value(&self, static_var: &StaticVariable) -> Result<InitValue> {
+        match static_var.c_type {
+            Type::Int => match static_var.initial_value {
+                Value::IntegerConstant(i) => Ok(InitValue::Int(i)),
+                Value::UnsignedIntegerConstant(u) => Ok(InitValue::Int(u as i32)),
+                Value::LongConstant(l) => Ok(InitValue::Int(l as i32)),
+                Value::UnsignedLongConstant(ul) => Ok(InitValue::Int(ul as i32)),
+                _ => Err(anyhow!("invalid initial value of static variable")),
+            },
+            Type::UInt => match static_var.initial_value {
+                Value::IntegerConstant(i) => Ok(InitValue::UInt(i as u32)),
+                Value::UnsignedIntegerConstant(u) => Ok(InitValue::UInt(u)),
+                Value::LongConstant(l) => Ok(InitValue::UInt(l as u32)),
+                Value::UnsignedLongConstant(ul) => Ok(InitValue::UInt(ul as u32)),
+                _ => Err(anyhow!("invalid initial value of static variable")),
+            },
+            Type::Long => match static_var.initial_value {
+                Value::IntegerConstant(i) => Ok(InitValue::Long(i as i64)),
+                Value::UnsignedIntegerConstant(u) => Ok(InitValue::Long(u as i64)),
+                Value::LongConstant(l) => Ok(InitValue::Long(l)),
+                Value::UnsignedLongConstant(ul) => Ok(InitValue::Long(ul as i64)),
+                _ => Err(anyhow!("invalid initial value of static variable")),
+            },
+            Type::ULong => match static_var.initial_value {
+                Value::IntegerConstant(i) => Ok(InitValue::ULong(i as u64)),
+                Value::UnsignedIntegerConstant(u) => Ok(InitValue::ULong(u as u64)),
+                Value::LongConstant(l) => Ok(InitValue::ULong(l as u64)),
+                Value::UnsignedLongConstant(ul) => Ok(InitValue::ULong(ul)),
+                _ => Err(anyhow!("invalid initial value of static variable")),
+            },
+            _ => Err(anyhow!("Unsupported type for static variable: {:?}", static_var.c_type)),
+        }
+    }
+
+    fn create_func_def(&mut self, func_def: &Function) -> Result<FuncDef> {
         let name = func_def.name.clone();
         let num_arg_regs = self.arg_registers.len();
         let mut instructions = vec![];

@@ -523,13 +523,13 @@ impl TackyEmitter {
                 src: expr_value,
                 dst: result.clone(),
             });
-        } else if expr_type.is_unsigned() && target_type.is_unsigned() {
-            instructions.push(Instruction::ZeroExtend {
+        } else if !expr_type.is_unsigned() {
+            instructions.push(Instruction::SignExtend {
                 src: expr_value,
                 dst: result.clone(),
             });
         } else {
-            instructions.push(Instruction::SignExtend {
+            instructions.push(Instruction::ZeroExtend {
                 src: expr_value,
                 dst: result.clone(),
             });
