@@ -209,7 +209,8 @@ pub enum BinaryOp {
     BitOr,
     BitXor,
     ShiftLeft,
-    ShiftRight,
+    ShiftRightLogical,
+    ShiftRightArithmetic,
 }
 
 #[derive(Debug, Clone, PartialEq)]

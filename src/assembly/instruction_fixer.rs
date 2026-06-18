@@ -146,14 +146,17 @@ impl InstructionFixer {
         new_instructions: &mut Vec<Instruction>,
     ) {
         use crate::assembly::ast::{
-            BinaryOp::{Add, BitAnd, BitOr, BitXor, Mul, ShiftLeft, ShiftRight, Sub},
+            BinaryOp::{
+                Add, BitAnd, BitOr, BitXor, Mul, ShiftLeft, ShiftRightArithmetic,
+                ShiftRightLogical, Sub,
+            },
             Instruction::{Binary, Mov},
             Operand::Register,
             Register::{CX, R10, R11},
         };
 
         let (left, replaced) = match op {
-            ShiftLeft | ShiftRight => (left.clone(), false),
+            ShiftLeft | ShiftRightArithmetic | ShiftRightLogical => (left.clone(), false),
             _ => Self::replace_long_src_operand(assembly_type, left, new_instructions),
         };
 
@@ -189,7 +192,7 @@ impl InstructionFixer {
                     }
                 }
             }
-            ShiftLeft | ShiftRight => {
+            ShiftLeft | ShiftRightArithmetic | ShiftRightLogical => {
                 if Self::is_memory(&left) {
                     new_instructions.push(Mov {
                         assembly_type: assembly_type.clone(),

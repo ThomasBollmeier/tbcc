@@ -1,6 +1,6 @@
 use crate::assembly::ast::{
-    AssemblyType, BinaryOp, ConditionCode, FuncDef, Instruction, Operand, Program, Register,
-    StaticVar, UnaryOp, Visitor,
+    AssemblyType, BinaryOp, ConditionCode, FuncDef, Instruction, Operand, Program,
+    Register, StaticVar, UnaryOp, Visitor,
 };
 use crate::assembly::symbol_table::SymbolTableEntry;
 use crate::common::InitValue;
@@ -118,7 +118,8 @@ impl CodeGenerator {
             BinaryOp::BitOr => "or".to_string(),
             BinaryOp::BitXor => "xor".to_string(),
             BinaryOp::ShiftLeft => "shl".to_string(),
-            BinaryOp::ShiftRight => "sar".to_string(),
+            BinaryOp::ShiftRightLogical => "shr".to_string(),
+            BinaryOp::ShiftRightArithmetic => "sar".to_string(),
         };
         let suffix = self.get_instruction_suffix(assembly_type);
         format!("{}{}", instruction, suffix)
@@ -237,7 +238,7 @@ impl Visitor for CodeGenerator {
 
         let (value, is_quadword) = match static_var.value {
             InitValue::Int(i) => (i as i64, false),
-            InitValue::UInt(u) => (u as i64, false) ,
+            InitValue::UInt(u) => (u as i64, false),
             InitValue::Long(l) => (l, true),
             InitValue::ULong(ul) => (ul as i64, true),
         };
@@ -287,10 +288,7 @@ impl Visitor for CodeGenerator {
                 let dst_str = self.operand_8byte_to_string(dst);
                 self.write_instruction(&format!("movslq \t{src_str}, {dst_str}"));
             }
-            Instruction::MovZeroExtend {
-                src: _,
-                dst: _,
-            } => unreachable!("cannot be reached"),
+            Instruction::MovZeroExtend { src: _, dst: _ } => unreachable!("cannot be reached"),
             Instruction::Ret => {
                 self.write_instruction("movq \t%rbp, %rsp");
                 self.write_instruction("popq \t%rbp");
@@ -526,6 +524,30 @@ mod tests {
         let asm_code = code_generator.generate_assembly(&assembly_program);
 
         print!("{asm_code}");
+    }
+
+    #[test]
+    fn generate_asm_with_compound_bitshift() {
+        let code = r#"
+        int main(void) {
+            int i = -2;
+            i >>= 3u;
+
+            if (i != -1) {
+                return 1;
+            }
+
+            return 0;
+        }
+        "#;
+
+        let (assembly_program, asm_symbol_table) = create_assembly(code);
+        let code_generator = CodeGenerator::new(asm_symbol_table);
+        let asm_code = code_generator.generate_assembly(&assembly_program);
+
+        print!("{asm_code}");
+
+
     }
 
     fn create_assembly(code: &str) -> (Program, SymbolTableRef<SymbolTableEntry>) {

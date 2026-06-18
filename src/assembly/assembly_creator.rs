@@ -15,6 +15,7 @@ use crate::tacky::ast::{
     StaticVariable, TopLevel, UnaryOperator, Value,
 };
 use anyhow::{anyhow, Result};
+use crate::ast::Type::{Int, Long, UInt, ULong};
 
 #[derive(Debug)]
 pub struct AssemblyCreator {
@@ -98,28 +99,28 @@ impl AssemblyCreator {
 
     fn determine_static_var_value(&self, static_var: &StaticVariable) -> Result<InitValue> {
         match static_var.c_type {
-            Type::Int => match static_var.initial_value {
+            Int => match static_var.initial_value {
                 Value::IntegerConstant(i) => Ok(InitValue::Int(i)),
                 Value::UnsignedIntegerConstant(u) => Ok(InitValue::Int(u as i32)),
                 Value::LongConstant(l) => Ok(InitValue::Int(l as i32)),
                 Value::UnsignedLongConstant(ul) => Ok(InitValue::Int(ul as i32)),
                 _ => Err(anyhow!("invalid initial value of static variable")),
             },
-            Type::UInt => match static_var.initial_value {
+            UInt => match static_var.initial_value {
                 Value::IntegerConstant(i) => Ok(InitValue::UInt(i as u32)),
                 Value::UnsignedIntegerConstant(u) => Ok(InitValue::UInt(u)),
                 Value::LongConstant(l) => Ok(InitValue::UInt(l as u32)),
                 Value::UnsignedLongConstant(ul) => Ok(InitValue::UInt(ul as u32)),
                 _ => Err(anyhow!("invalid initial value of static variable")),
             },
-            Type::Long => match static_var.initial_value {
+            Long => match static_var.initial_value {
                 Value::IntegerConstant(i) => Ok(InitValue::Long(i as i64)),
                 Value::UnsignedIntegerConstant(u) => Ok(InitValue::Long(u as i64)),
                 Value::LongConstant(l) => Ok(InitValue::Long(l)),
                 Value::UnsignedLongConstant(ul) => Ok(InitValue::Long(ul as i64)),
                 _ => Err(anyhow!("invalid initial value of static variable")),
             },
-            Type::ULong => match static_var.initial_value {
+            ULong => match static_var.initial_value {
                 Value::IntegerConstant(i) => Ok(InitValue::ULong(i as u64)),
                 Value::UnsignedIntegerConstant(u) => Ok(InitValue::ULong(u as u64)),
                 Value::LongConstant(l) => Ok(InitValue::ULong(l as u64)),
@@ -161,7 +162,7 @@ impl AssemblyCreator {
     fn create_instructions(
         &mut self,
         instructions: &Vec<TackyInstruction>,
-    ) -> anyhow::Result<Vec<Instruction>> {
+    ) -> Result<Vec<Instruction>> {
         let mut ret = vec![];
 
         for instruction in instructions {
@@ -546,7 +547,9 @@ impl AssemblyCreator {
         let src2_op = self.create_operand(src2);
         let dst_op = self.create_operand(dst);
 
-        let binary_op = self.map_binary_operator(op);
+        let is_src1_unsigned = self.is_value_unsigned(src1);
+
+        let binary_op = self.map_binary_operator(op, is_src1_unsigned);
         instructions.push(Mov {
             assembly_type: assembly_type.clone(),
             src: src1_op,
@@ -633,7 +636,7 @@ impl AssemblyCreator {
         }
     }
 
-    fn map_binary_operator(&self, binary_op: &TackyBinOp) -> crate::assembly::ast::BinaryOp {
+    fn map_binary_operator(&self, binary_op: &TackyBinOp, is_unsigned: bool) -> crate::assembly::ast::BinaryOp {
         use crate::tacky::ast::BinaryOperator::*;
         match binary_op {
             Add => crate::assembly::ast::BinaryOp::Add,
@@ -643,7 +646,11 @@ impl AssemblyCreator {
             BitOr => crate::assembly::ast::BinaryOp::BitOr,
             BitXor => crate::assembly::ast::BinaryOp::BitXor,
             ShiftLeft => crate::assembly::ast::BinaryOp::ShiftLeft,
-            ShiftRight => crate::assembly::ast::BinaryOp::ShiftRight,
+            ShiftRight => if is_unsigned {
+                crate::assembly::ast::BinaryOp::ShiftRightLogical
+            } else {
+                crate::assembly::ast::BinaryOp::ShiftRightArithmetic
+            }
             Divide => unreachable!(),
             Remainder => unreachable!(),
             _ => unimplemented!("unsupported binary operator {:?}", binary_op),
@@ -728,7 +735,7 @@ impl AssemblyCreator {
             Value::UnsignedIntegerConstant(_) | Value::UnsignedLongConstant(_) => true,
             Value::IntegerConstant(_) | Value::LongConstant(_) => false,
             Value::Variable(name) => match self.symbol_table.borrow().get_entry(name) {
-                Some(entry) => matches!(entry.c_type, Type::UInt | Type::ULong),
+                Some(entry) => matches!(entry.c_type, UInt | ULong),
                 None => panic!("Symbol not found: {}", name),
             },
         }
@@ -986,7 +993,7 @@ mod tests {
             symbol_table.borrow_mut().insert(
                 &var_name,
                 SymbolTableEntry {
-                    c_type: Type::Int,
+                    c_type: Int,
                     attrs: IdentAttrs::Local,
                 },
             );
@@ -1107,10 +1114,10 @@ mod tests {
                 dst: AsmOperand::Register(AsmRegister::AX)
             } if name == "tmp.2"
         ));
-        assert!(matches!(&instructions[7], AsmInstruction::Cdq(Longword)));
+        assert!(matches!(&instructions[7], Cdq(Longword)));
         assert!(matches!(
             &instructions[8],
-            AsmInstruction::Idiv {
+            Idiv {
                 assembly_type: Longword,
                 operand: AsmOperand::Immediate(ImmValue::Int(5)),
             },
@@ -1132,10 +1139,10 @@ mod tests {
                 dst: AsmOperand::Register(AsmRegister::AX)
             } if name == "tmp.3"
         ));
-        assert!(matches!(&instructions[11], AsmInstruction::Cdq(Longword)));
+        assert!(matches!(&instructions[11], Cdq(Longword)));
         assert!(matches!(
             &instructions[12],
-            AsmInstruction::Idiv {
+            Idiv {
                 assembly_type: Longword,
                 operand: AsmOperand::Immediate(ImmValue::Int(2)),
             },
