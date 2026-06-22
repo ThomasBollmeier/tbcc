@@ -25,4 +25,6 @@ pub struct Options {
     pub dont_assemble: bool,
     #[arg(short = 'c', help = "do not link")]
     pub dont_link: bool,
+    #[arg(short = 'l', help = "libraries to link")]
+    pub libraries: Vec<String>,
 }

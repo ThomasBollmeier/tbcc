@@ -118,6 +118,10 @@ fn create_output_file(assembly_files: &Vec<String>, options: &Options) -> Result
         }
         if options.dont_link {
             cmd.arg("-c");
+        } else {
+            for library in &options.libraries {
+                cmd.arg("-l").arg(library);
+            }
         }
         let status = cmd.arg("-o").arg(&output_file).status()?;
         status
