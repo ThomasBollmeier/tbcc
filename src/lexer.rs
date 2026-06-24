@@ -34,61 +34,145 @@ impl Into<Box<dyn TokenDerivation>> for TokenType {
     }
 }
 
-struct IntLongTokenDerivation;
+struct NumberTokenDerivation {
+    combined_pattern: String,
+    regex_map: HashMap<TokenType, Regex>,
+}
 
-impl TokenDerivation for IntLongTokenDerivation {
-    fn derive_token_type(&self, lexeme: &str) -> Result<TokenType> {
-        match self.derive_token_value(lexeme)? {
-            Some(TokenValue::Integer(_)) => Ok(TokenType::IntegerConstant),
-            Some(TokenValue::UnsignedInteger(_)) => Ok(TokenType::UnsignedIntegerConstant),
-            Some(TokenValue::Long(_)) => Ok(TokenType::LongConstant),
-            Some(TokenValue::UnsignedLong(_)) => Ok(TokenType::UnsignedLongConstant),
-            None => Err(anyhow::anyhow!(
-                "{} is not a valid int or long literal",
-                lexeme
-            )),
+impl NumberTokenDerivation {
+    fn new() -> Self {
+        let patterns = HashMap::from([
+            (TokenType::IntegerConstant, r"^\d+"),
+            (TokenType::UnsignedIntegerConstant, r"\d+[uU]"),
+            (TokenType::LongConstant, r"\d+[lL]"),
+            (TokenType::UnsignedLongConstant, r"\d+([uU][lL]|[lL][uU])"),
+            (
+                TokenType::DoubleConstant,
+                r"((\d*\.\d+|\d+\.?)[eE][+-]?\d+|\d*\.\d+|\d+\.)",
+            ),
+        ]);
+        let regex_map: HashMap<TokenType, Regex> = patterns
+            .iter()
+            .map(|(token_type, pattern)| {
+                let regex = Regex::new(pattern).unwrap();
+                (token_type.clone(), regex)
+            })
+            .collect();
+
+        let combined_pattern = format!(
+            r"({})(?![\w\.])",
+            patterns.values().cloned().collect::<Vec<&str>>().join("|")
+        );
+
+        Self {
+            combined_pattern,
+            regex_map,
         }
     }
 
-    fn derive_token_value(&self, lexeme: &str) -> Result<Option<TokenValue>> {
-        let regex_ul = Regex::new("([uU][lL]|[lL][uU])$")?;
-        let regex_u = Regex::new("[uU]$")?;
-        let regex_l = Regex::new("[lL]$")?;
+    pub fn get_combined_pattern(&self) -> String {
+        self.combined_pattern.to_string()
+    }
 
-        if regex_ul.is_match(lexeme)? {
-            let lexeme = &lexeme[..lexeme.len() - 2]; // Remove the trailing 'ul', 'uL', 'Ul', or 'UL'
-            let ulong_val = lexeme.parse::<u64>()?;
-            Ok(Some(TokenValue::UnsignedLong(ulong_val)))
-        } else if regex_u.is_match(lexeme)? {
-            let lexeme = &lexeme[..lexeme.len() - 1]; // Remove the trailing 'u' or 'U'
-            let u_val = lexeme.parse::<u32>();
-            if u_val.is_ok() {
-                return Ok(Some(TokenValue::UnsignedInteger(u_val?)));
+    fn verify_number_token_type(lexeme: &str, token_type: &TokenType) -> Result<TokenType> {
+        match token_type {
+            TokenType::IntegerConstant => {
+                if lexeme.parse::<i32>().is_ok() {
+                    Ok(TokenType::IntegerConstant)
+                } else {
+                    Self::verify_unsigned(lexeme)
+                }
             }
-            let ulong_val = lexeme.parse::<u64>()?;
-            Ok(Some(TokenValue::UnsignedLong(ulong_val)))
-        } else if regex_l.is_match(lexeme)? {
-            let lexeme = &lexeme[..lexeme.len() - 1]; // Remove the trailing 'l' or 'L'
-            let long_val = lexeme.parse::<i64>()?;
-            Ok(Some(TokenValue::Long(long_val)))
+            TokenType::UnsignedIntegerConstant => {
+                let lexeme = &lexeme[0..lexeme.len() - 1]; // Remove the trailing 'u' or 'U'
+                Self::verify_unsigned(lexeme)
+            }
+            TokenType::LongConstant => {
+                let lexeme = &lexeme[0..lexeme.len() - 1]; // Remove the trailing 'l' or 'L'
+                Self::verify_long(lexeme)
+            }
+            TokenType::UnsignedLongConstant => {
+                let lexeme = &lexeme[0..lexeme.len() - 2]; // Remove the trailing 'ul', 'uL', 'Ul', or 'UL'
+                Self::verify_unsigned_long(lexeme)
+            }
+            _ => Ok(token_type.clone()),
+        }
+    }
+
+    fn verify_unsigned(lexeme: &str) -> Result<TokenType> {
+        if lexeme.parse::<u32>().is_ok() {
+            Ok(TokenType::UnsignedIntegerConstant)
         } else {
-            let int_val = lexeme.parse::<i32>();
-            if int_val.is_ok() {
-                return Ok(Some(TokenValue::Integer(int_val?)));
-            }
-            let long_val = lexeme.parse::<i64>();
-            if long_val.is_ok() {
-                return Ok(Some(TokenValue::Long(long_val?)));
-            }
-            let ulong_val = lexeme.parse::<u64>()?;
-            Ok(Some(TokenValue::UnsignedLong(ulong_val)))
+            Self::verify_long(lexeme)
+        }
+    }
+
+    fn verify_long(lexeme: &str) -> Result<TokenType> {
+        if lexeme.parse::<i64>().is_ok() {
+            Ok(TokenType::LongConstant)
+        } else {
+            Self::verify_unsigned_long(lexeme)
+        }
+    }
+
+    fn verify_unsigned_long(lexeme: &str) -> Result<TokenType> {
+        if lexeme.parse::<u64>().is_ok() {
+            Ok(TokenType::UnsignedLongConstant)
+        } else {
+            Err(anyhow::anyhow!("{} is not a valid number literal", lexeme))
         }
     }
 }
 
-impl Into<Box<dyn TokenDerivation>> for IntLongTokenDerivation {
+impl TokenDerivation for NumberTokenDerivation {
+    fn derive_token_type(&self, lexeme: &str) -> Result<TokenType> {
+        let mut max_match_length = 0;
+        let mut max_match_type_opt: Option<TokenType> = None;
+
+        for (token_type, regex) in &self.regex_map {
+            if let Ok(Some(regex_match)) = regex.find(lexeme) {
+                let matched_len = regex_match.as_str().len();
+                if matched_len > max_match_length {
+                    max_match_length = matched_len;
+                    max_match_type_opt = Some(token_type.clone());
+                }
+            }
+        }
+
+        match max_match_type_opt {
+            Some(token_type) => match Self::verify_number_token_type(lexeme, &token_type) {
+                Ok(token_type) => Ok(token_type),
+                Err(e) => Err(e),
+            },
+            None => Err(anyhow::anyhow!("{} is not a valid number literal", lexeme)),
+        }
+    }
+
+    fn derive_token_value(&self, lexeme: &str) -> Result<Option<TokenValue>> {
+        let token_type = self.derive_token_type(lexeme)?;
+        let lexeme = lexeme.trim_end_matches(|c| c == 'u' || c == 'U' || c == 'l' || c == 'L');
+
+        let value = match token_type {
+            TokenType::IntegerConstant => Some(TokenValue::Integer(lexeme.parse::<i32>()?)),
+            TokenType::UnsignedIntegerConstant => {
+                Some(TokenValue::UnsignedInteger(lexeme.parse::<u32>()?))
+            }
+
+            TokenType::LongConstant => Some(TokenValue::Long(lexeme.parse::<i64>()?)),
+            TokenType::UnsignedLongConstant => {
+                Some(TokenValue::UnsignedLong(lexeme.parse::<u64>()?))
+            }
+            TokenType::DoubleConstant => Some(TokenValue::Double(lexeme.parse::<f64>()?)),
+            _ => return Err(anyhow::anyhow!("{} is not a valid number literal", lexeme)),
+        };
+
+        Ok(value)
+    }
+}
+
+impl Into<Box<dyn TokenDerivation>> for NumberTokenDerivation {
     fn into(self) -> Box<dyn TokenDerivation> {
-        Box::new(IntLongTokenDerivation)
+        Box::new(self)
     }
 }
 
@@ -113,10 +197,10 @@ impl Lexer {
         lexer.add_token_rule_full(TokenType::Whitespace, r"\s+", true, false);
         lexer.add_token_rule_full(TokenType::LineComment, r"//.*", true, false);
 
-        lexer.add_token_rule(
-            IntLongTokenDerivation,
-            r"\d+([lL]|[uU]|[lL][uU]|[uU][lL])?\b",
-        );
+        let number_token_derivation = NumberTokenDerivation::new();
+        let pattern = number_token_derivation.get_combined_pattern();
+        lexer.add_token_rule(number_token_derivation, &pattern);
+
         lexer.add_token_rule(TokenType::Identifier, r"[a-zA-Z_][a-zA-Z0-9_]*\b");
         lexer.add_token_rule(TokenType::LeftParen, r"\(");
         lexer.add_token_rule(TokenType::RightParen, r"\)");
@@ -162,37 +246,26 @@ impl Lexer {
         lexer.add_token_rule(TokenType::QuestionMark, r"\?");
         lexer.add_token_rule(TokenType::Colon, r":");
 
-        lexer.keywords.insert("int".to_string(), TokenType::Int);
-        lexer.keywords.insert("long".to_string(), TokenType::Long);
-        lexer.keywords.insert("signed".to_string(), TokenType::Signed);
-        lexer.keywords.insert("unsigned".to_string(), TokenType::Unsigned);
-        lexer.keywords.insert("void".to_string(), TokenType::Void);
-        lexer
-            .keywords
-            .insert("return".to_string(), TokenType::Return);
-        lexer.keywords.insert("if".to_string(), TokenType::If);
-        lexer.keywords.insert("else".to_string(), TokenType::Else);
-        lexer.keywords.insert("goto".to_string(), TokenType::Goto);
-        lexer.keywords.insert("do".to_string(), TokenType::Do);
-        lexer.keywords.insert("while".to_string(), TokenType::While);
-        lexer.keywords.insert("for".to_string(), TokenType::For);
-        lexer.keywords.insert("break".to_string(), TokenType::Break);
-        lexer
-            .keywords
-            .insert("continue".to_string(), TokenType::Continue);
-        lexer
-            .keywords
-            .insert("switch".to_string(), TokenType::Switch);
-        lexer.keywords.insert("case".to_string(), TokenType::Case);
-        lexer
-            .keywords
-            .insert("default".to_string(), TokenType::Default);
-        lexer
-            .keywords
-            .insert("static".to_string(), TokenType::Static);
-        lexer
-            .keywords
-            .insert("extern".to_string(), TokenType::Extern);
+        lexer.add_keyword("int", TokenType::Int);
+        lexer.add_keyword("long", TokenType::Long);
+        lexer.add_keyword("signed", TokenType::Signed);
+        lexer.add_keyword("unsigned", TokenType::Unsigned);
+        lexer.add_keyword("double", TokenType::Double);
+        lexer.add_keyword("void", TokenType::Void);
+        lexer.add_keyword("return", TokenType::Return);
+        lexer.add_keyword("if", TokenType::If);
+        lexer.add_keyword("else", TokenType::Else);
+        lexer.add_keyword("goto", TokenType::Goto);
+        lexer.add_keyword("do", TokenType::Do);
+        lexer.add_keyword("while", TokenType::While);
+        lexer.add_keyword("for", TokenType::For);
+        lexer.add_keyword("break", TokenType::Break);
+        lexer.add_keyword("continue", TokenType::Continue);
+        lexer.add_keyword("switch", TokenType::Switch);
+        lexer.add_keyword("case", TokenType::Case);
+        lexer.add_keyword("default", TokenType::Default);
+        lexer.add_keyword("static", TokenType::Static);
+        lexer.add_keyword("extern", TokenType::Extern);
 
         lexer
     }
@@ -310,6 +383,10 @@ impl Lexer {
         self.token_types.push(token_type_data);
     }
 
+    fn add_keyword(&mut self, keyword: &str, token_type: TokenType) {
+        self.keywords.insert(keyword.to_string(), token_type);
+    }
+
     fn advance_position(lexeme: &str, line: usize, column: usize) -> (usize, usize) {
         let mut new_line = line;
         let mut new_column = column;
@@ -408,10 +485,11 @@ mod tests {
            42lU
            42Lu
            42LU
+           4.2E1
         "#;
 
         let tokens = lexer.scan_tokens(code).unwrap();
-        assert_eq!(tokens.len(), 13);
+        assert_eq!(tokens.len(), 14);
 
         assert_eq!(tokens[0].token_type, TokenType::IntegerConstant);
         assert_eq!(tokens[0].value, Some(TokenValue::Integer(42)));
@@ -431,6 +509,8 @@ mod tests {
             assert_eq!(tokens[i].value, Some(TokenValue::UnsignedLong(42)));
         }
 
+        assert_eq!(tokens[13].token_type, TokenType::DoubleConstant);
+        assert_eq!(tokens[13].value, Some(TokenValue::Double(42.0)));
     }
 
     #[test]
@@ -774,5 +854,24 @@ mod tests {
 
         let tokens = lexer.scan_tokens(code).unwrap();
         assert_eq!(tokens.len(), 31);
+    }
+
+    #[test]
+    fn scan_double_to_unsigned_integer() {
+        let lexer = Lexer::new();
+
+        let code = r#"
+        int main(void) {
+
+            if (double_to_uint(2147483750.5) != 2147483750) {
+                return 2;
+            }
+
+            return 0;
+        }
+        "#;
+
+        let tokens = lexer.scan_tokens(code).unwrap();
+        assert!(tokens.len() > 0);
     }
 }

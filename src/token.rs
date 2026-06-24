@@ -7,10 +7,12 @@ pub enum TokenType {
     UnsignedIntegerConstant,
     LongConstant,
     UnsignedLongConstant,
+    DoubleConstant,
     Int,
     Long,
     Signed,
     Unsigned,
+    Double,
     Void,
     Return,
     LeftParen,
@@ -77,6 +79,7 @@ pub enum TokenValue {
     UnsignedInteger(u32),
     Long(i64),
     UnsignedLong(u64),
+    Double(f64),
 }
 
 #[derive(Debug, Clone)]

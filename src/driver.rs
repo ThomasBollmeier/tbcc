@@ -128,7 +128,7 @@ fn create_output_file(assembly_files: &Vec<String>, options: &Options) -> Result
     };
 
     if !status.success() {
-        return Err(anyhow!("gcc preprocessing failed with status: {status}"));
+        return Err(anyhow!("gcc linking step failed with status: {status}"));
     }
 
     Ok(())
