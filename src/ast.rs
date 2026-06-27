@@ -98,6 +98,7 @@ pub enum Type {
     UInt,
     Long,
     ULong,
+    Double,
     Function {
         return_type: Box<Type>,
         param_types: Vec<Type>,
@@ -312,6 +313,7 @@ pub enum Expression {
     UnsignedIntegerConstant(u32),
     LongConstant(i64),
     UnsignedLongConstant(u64),
+    DoubleConstant(f64),
     Cast {
         expr: Box<TypedExpression>,
         target_type: Type,

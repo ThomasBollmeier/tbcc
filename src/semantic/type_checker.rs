@@ -445,6 +445,7 @@ impl TypeChecker {
             UnsignedIntegerConstant(_) => self.set_type_uint_constant(typed_expr),
             LongConstant(_) => self.set_type_long_constant(typed_expr),
             UnsignedLongConstant(_) => self.set_type_ulong_constant(typed_expr),
+            DoubleConstant(_) => self.set_type_double_constant(typed_expr),
             Cast { expr, target_type } => self.set_type_cast(expr, target_type),
             Var(name) => self.set_type_var(name, typed_expr),
             FuncCall { name, args } => self.set_type_function_call(name, args),
@@ -673,6 +674,12 @@ impl TypeChecker {
     fn set_type_ulong_constant(&self, typed_expr: &TypedExpression) -> Result<TypedExpression> {
         let mut result = typed_expr.clone();
         result.set_type(Type::ULong);
+        Ok(result)
+    }
+
+    fn set_type_double_constant(&self, typed_expr: &TypedExpression) -> Result<TypedExpression> {
+        let mut result = typed_expr.clone();
+        result.set_type(Type::Double);
         Ok(result)
     }
 

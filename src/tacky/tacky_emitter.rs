@@ -454,7 +454,10 @@ impl TackyEmitter {
                 self.emit_unsigned_integer_constant(*_value)
             }
             Expression::LongConstant(value) => self.emit_long_constant(*value),
-            Expression::UnsignedLongConstant(_value) => self.emit_unsigned_long_constant(*_value),
+            Expression::UnsignedLongConstant(value) => self.emit_unsigned_long_constant(*value),
+            Expression::DoubleConstant(value) => {
+                panic!("Double constants are not yet supported in this emitter: {}", value)
+            }
             Expression::UnaryExpr(op, expr) => {
                 self.emit_unary_expr(op, expr, &expr_type, instructions)
             }

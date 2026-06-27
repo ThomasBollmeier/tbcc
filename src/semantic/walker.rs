@@ -211,6 +211,7 @@ fn walk_expression(expr: &mut Expression, walker: &mut impl WalkerMut) -> Result
         UnsignedIntegerConstant(_) => {}
         LongConstant(_) => {}
         UnsignedLongConstant(_) => {}
+        DoubleConstant(_) => {}
         Cast {
             target_type: _,
             expr,

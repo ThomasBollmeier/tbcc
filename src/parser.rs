@@ -8,11 +8,21 @@ use crate::token::{Token, TokenStream, TokenType, TokenValue};
 use anyhow::{Result, anyhow};
 use std::collections::HashSet;
 
-pub struct Parser {}
+mod specifier_parser;
+use specifier_parser::SpecifierParser;
+use specifier_parser::{make_specifier_parser, make_type_specifier_parser};
+
+pub struct Parser {
+    specifier_parser: SpecifierParser,
+    type_specifier_parser: SpecifierParser,
+}
 
 impl Parser {
     pub fn new() -> Self {
-        Parser {}
+        Parser {
+            specifier_parser: make_specifier_parser(),
+            type_specifier_parser: make_type_specifier_parser(),
+        }
     }
 
     pub fn parse(&self, tokens: Vec<Token>) -> Result<Program> {
@@ -82,75 +92,23 @@ impl Parser {
     }
 
     fn specifiers(&self, stream: &mut TokenStream) -> Result<HashSet<TokenType>> {
-        let type_token_types: HashSet<TokenType> = HashSet::from_iter([
-            TokenType::Int,
-            TokenType::Long,
-            TokenType::Unsigned,
-            TokenType::Signed,
-        ]);
-        let storage_token_types: HashSet<TokenType> =
-            HashSet::from_iter([TokenType::Extern, TokenType::Static]);
-        let allowed_token_types: HashSet<TokenType> = type_token_types
-            .union(&storage_token_types)
-            .cloned()
-            .collect();
-        let specifiers = self.get_specifiers(stream, &allowed_token_types)?;
-
-        if !specifiers.iter().any(|t| type_token_types.contains(t)) {
-            return Err(anyhow!("type specifier is missing"));
+        let specs = self.specifier_parser.parse(stream)?;
+        if specs.is_empty() {
+            return Err(anyhow!("No specifiers found"));
         }
-
-        if specifiers.contains(&TokenType::Signed) && specifiers.contains(&TokenType::Unsigned) {
-            return Err(anyhow!(
-                "signed specifier cannot be specified together with unsigned"
-            ));
-        }
-
-        if specifiers.contains(&TokenType::Static) && specifiers.contains(&TokenType::Extern) {
-            return Err(anyhow!(
-                "static specifier cannot be specified together with extern"
-            ));
-        }
-
-        Ok(specifiers)
+        Ok(specs)
     }
 
     fn type_specifiers(&self, stream: &mut TokenStream) -> Result<HashSet<TokenType>> {
-        let allowed_token_types: HashSet<TokenType> = HashSet::from_iter([
-            TokenType::Int,
-            TokenType::Long,
-            TokenType::Signed,
-            TokenType::Unsigned,
-        ]);
-        let specifiers = self.get_specifiers(stream, &allowed_token_types)?;
-
-        if specifiers.contains(&TokenType::Signed) && specifiers.contains(&TokenType::Unsigned) {
-            return Err(anyhow!(
-                "signed specifier cannot be specified together with unsigned"
-            ));
+        let ret = self.type_specifier_parser.parse(stream)?;
+        if ret.is_empty() {
+            return Err(anyhow!("Unexpected empty type specifiers"));
         }
-        Ok(specifiers)
+        Ok(ret)
     }
 
-    fn get_specifiers(
-        &self,
-        stream: &mut TokenStream,
-        allowed_token_types: &HashSet<TokenType>,
-    ) -> Result<HashSet<TokenType>> {
-        let mut specifiers = HashSet::new();
-
-        while let Some(token) = stream.peek() {
-            if !allowed_token_types.contains(&token.token_type) {
-                break;
-            }
-            if specifiers.contains(&token.token_type) {
-                return Err(anyhow!("duplicate specifier {}", token.lexeme));
-            }
-            specifiers.insert(token.token_type.clone());
-            stream.advance();
-        }
-
-        Ok(specifiers)
+    fn optional_type_specifiers(&self, stream: &mut TokenStream) -> Result<HashSet<TokenType>> {
+        self.type_specifier_parser.parse(stream)
     }
 
     fn function_declaration(
@@ -250,6 +208,7 @@ impl Parser {
                 TokenType::RightBrace => break,
                 TokenType::Int
                 | TokenType::Long
+                | TokenType::Double
                 | TokenType::Unsigned
                 | TokenType::Signed
                 | TokenType::Static
@@ -509,6 +468,7 @@ impl Parser {
         let for_init = match token.token_type {
             TokenType::Int
             | TokenType::Long
+            | TokenType::Double
             | TokenType::Signed
             | TokenType::Unsigned
             | TokenType::Extern
@@ -753,6 +713,13 @@ impl Parser {
                     return Err(anyhow!("Expected unsigned long integer constant value"));
                 }
             }
+            TokenType::DoubleConstant => {
+                if let Some(TokenValue::Double(value)) = token.value {
+                    typed(Expression::DoubleConstant(value))
+                } else {
+                    return Err(anyhow!("Expected double constant value"));
+                }
+            }
             TokenType::Identifier => {
                 let name = token.lexeme.clone();
                 let is_func_call = if let Some(next_token) = stream.peek() {
@@ -791,7 +758,7 @@ impl Parser {
                 })
             }
             TokenType::LeftParen => {
-                let type_specifiers = self.type_specifiers(stream)?;
+                let type_specifiers = self.optional_type_specifiers(stream)?;
                 if !type_specifiers.is_empty() {
                     // Cast expresssion
                     let target_type = Self::type_from_specifiers(&type_specifiers)?;
@@ -1338,6 +1305,28 @@ mod tests {
             return (unsigned signed) 42;
         }
         "#;
+
+        parse_code(code, false);
+    }
+
+    #[test]
+    fn parse_double_constant() {
+        let code = r#"
+        int main(void) {
+            double answer = 42.0;
+            return 0;
+        }"#;
+
+        parse_code(code, true);
+    }
+
+    #[test]
+    fn parse_double_constant_err() {
+        let code = r#"
+        int main(void) {
+            unsigned double answer = 42.0;
+            return 0;
+        }"#;
 
         parse_code(code, false);
     }
