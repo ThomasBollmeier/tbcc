@@ -241,6 +241,7 @@ impl Visitor for CodeGenerator {
             InitValue::UInt(u) => (u as i64, false),
             InitValue::Long(l) => (l, true),
             InitValue::ULong(ul) => (ul as i64, true),
+            InitValue::Double(_) => todo!("Support for double static variables is not implemented yet"),
         };
 
         if value != 0 {

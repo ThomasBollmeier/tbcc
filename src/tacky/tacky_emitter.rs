@@ -74,6 +74,9 @@ impl TackyEmitter {
                         Some(InitialValue::Initialized(InitValue::ULong(ul_val))) => {
                             UnsignedLongConstant(*ul_val)
                         }
+                        Some(InitialValue::Initialized(InitValue::Double(_))) => {
+                            todo!("double type not supported yet")
+                        }
                         Some(InitialValue::Tentative) => match entry.c_type {
                             Type::Int => IntegerConstant(0),
                             Type::UInt => UnsignedIntegerConstant(0),

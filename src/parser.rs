@@ -82,6 +82,8 @@ impl Parser {
             } else {
                 Ok(Type::Long)
             }
+        } else if specifiers.contains(&TokenType::Double) {
+            Ok(Type::Double)
         } else {
             if specifiers.contains(&TokenType::Unsigned) {
                 Ok(Type::UInt)

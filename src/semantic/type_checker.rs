@@ -194,6 +194,9 @@ impl TypeChecker {
                 Expression::UnsignedLongConstant(ul) => {
                     Some(InitialValue::Initialized(InitValue::ULong(*ul)))
                 }
+                Expression::DoubleConstant(d) => {
+                    Some(InitialValue::Initialized(InitValue::Double(*d)))
+                }
                 _ => {
                     return Err(anyhow!(
                         "Only integer constants are allowed as initializers for file-scope variables"
@@ -356,8 +359,17 @@ impl TypeChecker {
             Some(TypedExpression(Expression::IntegerConstant(i), _)) => {
                 Some(InitialValue::Initialized(InitValue::Int(*i)))
             }
+            Some(TypedExpression(Expression::UnsignedIntegerConstant(u), _)) => {
+                Some(InitialValue::Initialized(InitValue::UInt(*u)))
+            }
             Some(TypedExpression(Expression::LongConstant(l), _)) => {
                 Some(InitialValue::Initialized(InitValue::Long(*l)))
+            }
+            Some(TypedExpression(Expression::UnsignedLongConstant(ul), _)) => {
+                Some(InitialValue::Initialized(InitValue::ULong(*ul)))
+            }
+            Some(TypedExpression(Expression::DoubleConstant(d), _)) => {
+                Some(InitialValue::Initialized(InitValue::Double(*d)))
             }
             Some(_) => {
                 return Err(anyhow!(
@@ -415,6 +427,10 @@ impl TypeChecker {
     fn get_common_type(type_a: &Type, type_b: &Type) -> Type {
         if type_a == type_b {
             return type_a.clone();
+        }
+
+        if *type_a == Type::Double || *type_b == Type::Double {
+            return Type::Double;
         }
 
         if !type_a.is_integer_type() || !type_b.is_integer_type() {
@@ -545,22 +561,8 @@ impl TypeChecker {
             | BinaryOp::BitOr
             | BinaryOp::BitXor => {
                 // Check operator types:
-                match left.get_type() {
-                    Type::Function { .. } | Type::Undefined => {
-                        return Err(anyhow!(
-                            "Cannot apply arithmetic operator to non-number type"
-                        ));
-                    }
-                    _ => {}
-                }
-                match right.get_type() {
-                    Type::Function { .. } | Type::Undefined => {
-                        return Err(anyhow!(
-                            "Cannot apply arithmetic operator to non-number type"
-                        ));
-                    }
-                    _ => {}
-                }
+                Self::check_binary_operand(&left, binary_op)?;
+                Self::check_binary_operand(&right, binary_op)?;
             }
             _ => {
                 binary_type = Type::Int;
@@ -571,6 +573,26 @@ impl TypeChecker {
             BinaryExpr(binary_op.clone(), Box::new(left), Box::new(right)),
             binary_type,
         ))
+    }
+
+    fn check_binary_operand(operand: &TypedExpression, binary_op: &BinaryOp) -> Result<()> {
+        match operand.get_type() {
+            Type::Function { .. } | Type::Undefined => {
+                return Err(anyhow!(
+                    "Cannot apply arithmetic operator to non-number type"
+                ));
+            }
+            Type::Double => {
+                if *binary_op == BinaryOp::Remainder {
+                    return Err(anyhow!(
+                        "Cannot apply remainder operator to non-number type"
+                    ));
+                }
+            }
+            _ => {}
+        }
+
+        Ok(())
     }
 
     fn set_type_unary(
@@ -584,10 +606,18 @@ impl TypeChecker {
                 Expression::UnaryExpr(UnaryOp::Not, Box::new(operand)),
                 Type::Int,
             )),
-            _ => Ok(TypedExpression::with_type(
-                Expression::UnaryExpr(unary_op.clone(), Box::new(operand.clone())),
-                operand.get_type(),
-            )),
+            _ => {
+                let operand_type = operand.get_type();
+                if *unary_op == UnaryOp::Complement && !operand_type.is_integer_type() {
+                    return Err(anyhow!(
+                        "Cannot apply bitwise complement operator to non-integer type"
+                    ));
+                }
+                Ok(TypedExpression::with_type(
+                    Expression::UnaryExpr(unary_op.clone(), Box::new(operand.clone())),
+                    operand.get_type(),
+                ))
+            }
         }
     }
 
@@ -989,6 +1019,19 @@ mod tests {
         "#;
 
         check_code(code).expect("Expected code to type check successfully");
+    }
+
+    #[test]
+    fn invalid_use_of_remainder_for_double() {
+        let code = r#"
+        int main(void) {
+            double answer = 42.0;
+            int ret = answer % 2;
+            return ret;
+        }
+        "#;
+
+        check_code(code).expect_err("Expected code to fail for modulo of double");
     }
 
     fn check_code(code: &str) -> Result<Program> {

@@ -87,6 +87,7 @@ impl AssemblyCreator {
         let alignment = match value {
             InitValue::Int(_) | InitValue::UInt(_) => 4,
             InitValue::Long(_) | InitValue::ULong(_) => 8,
+            InitValue::Double(_) => todo!("double type not supported yet"),
         };
 
         Ok(StaticVar {

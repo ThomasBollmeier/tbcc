@@ -31,6 +31,7 @@ pub enum InitValue {
     UInt(u32),
     Long(i64),
     ULong(u64),
+    Double(f64),
 }
 
 #[cfg(test)]
