@@ -1,7 +1,5 @@
 use super::ast::Instruction::Unary;
-use super::ast::Value::{
-    IntegerConstant, LongConstant, UnsignedIntegerConstant, UnsignedLongConstant,
-};
+use super::ast::Value::{DoubleConstant, IntegerConstant, LongConstant, UnsignedIntegerConstant, UnsignedLongConstant};
 use super::ast::{BinaryOperator, Function, Instruction, Program, TopLevel, UnaryOperator, Value};
 use crate::ast::{
     BinaryOp, Block, BlockItem, Expression, ForInit, FunctionDeclaration, Label, Statement,
@@ -74,14 +72,15 @@ impl TackyEmitter {
                         Some(InitialValue::Initialized(InitValue::ULong(ul_val))) => {
                             UnsignedLongConstant(*ul_val)
                         }
-                        Some(InitialValue::Initialized(InitValue::Double(_))) => {
-                            todo!("double type not supported yet")
+                        Some(InitialValue::Initialized(InitValue::Double(d_val_))) => {
+                            DoubleConstant(*d_val_)
                         }
                         Some(InitialValue::Tentative) => match entry.c_type {
                             Type::Int => IntegerConstant(0),
                             Type::UInt => UnsignedIntegerConstant(0),
                             Type::Long => LongConstant(0),
                             Type::ULong => UnsignedLongConstant(0),
+                            Type::Double => DoubleConstant(0.0),
                             _ => unreachable!(),
                         },
                         None => return None,
@@ -458,9 +457,7 @@ impl TackyEmitter {
             }
             Expression::LongConstant(value) => self.emit_long_constant(*value),
             Expression::UnsignedLongConstant(value) => self.emit_unsigned_long_constant(*value),
-            Expression::DoubleConstant(value) => {
-                panic!("Double constants are not yet supported in this emitter: {}", value)
-            }
+            Expression::DoubleConstant(value) => self.emit_double_constant(*value),
             Expression::UnaryExpr(op, expr) => {
                 self.emit_unary_expr(op, expr, &expr_type, instructions)
             }
@@ -512,6 +509,39 @@ impl TackyEmitter {
         }
 
         let result = self.make_temp_var(target_type);
+
+        match (&expr_type, target_type) {
+            (Type::Double, Type::Int) | (Type::Double, Type::Long) => {
+                instructions.push(Instruction::DoubleToInt {
+                    src: expr_value,
+                    dst: result.clone(),
+                });
+                return result;
+            }
+            (Type::Double, Type::UInt) | (Type::Double, Type::ULong) => {
+                instructions.push(Instruction::DoubleToUint {
+                    src: expr_value,
+                    dst: result.clone(),
+                });
+                return result;
+            }
+            (Type::Int, Type::Double) | (Type::Long, Type::Double) => {
+                instructions.push(Instruction::IntToDouble {
+                    src: expr_value,
+                    dst: result.clone(),
+                });
+                return result;
+            }
+            (Type::UInt, Type::Double) | (Type::ULong, Type::Double) => {
+                instructions.push(Instruction::UintToDouble {
+                    src: expr_value,
+                    dst: result.clone(),
+                });
+                return result;
+            }
+            _ => {}
+        }
+
         let expr_size = expr_type
             .get_int_size()
             .expect("Only integer types should be casted in this emitter");
@@ -558,6 +588,10 @@ impl TackyEmitter {
 
     fn emit_unsigned_long_constant(&self, value: u64) -> Value {
         UnsignedLongConstant(value)
+    }
+
+    fn emit_double_constant(&self, value: f64) -> Value {
+        DoubleConstant(value)
     }
 
     fn emit_var_expr(&self, name: &str) -> Value {

@@ -40,6 +40,22 @@ pub enum Instruction {
         src: Value,
         dst: Value,
     },
+    DoubleToInt {
+        src: Value,
+        dst: Value,
+    },
+    DoubleToUint {
+        src: Value,
+        dst: Value,
+    },
+    IntToDouble {
+        src: Value,
+        dst: Value,
+    },
+    UintToDouble {
+        src: Value,
+        dst: Value,
+    },
     Unary {
         op: UnaryOperator,
         src: Value,
@@ -80,6 +96,7 @@ pub enum Value {
     UnsignedIntegerConstant(u32),
     LongConstant(i64),
     UnsignedLongConstant(u64),
+    DoubleConstant(f64),
     Variable(String),
 }
 

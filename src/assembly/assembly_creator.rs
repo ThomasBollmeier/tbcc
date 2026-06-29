@@ -216,6 +216,7 @@ impl AssemblyCreator {
                     arguments,
                     dst,
                 } => self.push_function_call(&mut ret, name, arguments, dst),
+                _ => todo!("Instruction not implemented: {:?}", instruction),
             }
         }
 
@@ -624,6 +625,7 @@ impl AssemblyCreator {
             Value::UnsignedIntegerConstant(u) => Operand::Immediate(ImmValue::UInt(*u)),
             Value::LongConstant(l) => Operand::Immediate(ImmValue::Long(*l)),
             Value::UnsignedLongConstant(ul) => Operand::Immediate(ImmValue::ULong(*ul)),
+            Value::DoubleConstant(_) => todo!("double type not supported yet"),
             Value::Variable(name) => Operand::PseudoReg(name.clone()),
         }
     }
@@ -709,6 +711,7 @@ impl AssemblyCreator {
             Value::UnsignedIntegerConstant(_) => Longword,
             Value::LongConstant(_) => Quadword,
             Value::UnsignedLongConstant(_) => Quadword,
+            Value::DoubleConstant(_) => todo!("double type not supported yet"),
             Value::Variable(name) => self.lookup_asm_type(name),
         }
     }
@@ -735,6 +738,7 @@ impl AssemblyCreator {
         match value {
             Value::UnsignedIntegerConstant(_) | Value::UnsignedLongConstant(_) => true,
             Value::IntegerConstant(_) | Value::LongConstant(_) => false,
+            Value::DoubleConstant(_) => false,
             Value::Variable(name) => match self.symbol_table.borrow().get_entry(name) {
                 Some(entry) => matches!(entry.c_type, UInt | ULong),
                 None => panic!("Symbol not found: {}", name),
