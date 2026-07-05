@@ -1,7 +1,7 @@
 use crate::ast::Expression::{BinaryExpr, Cast, FuncCall};
 use crate::ast::{
-    BinaryOp, Expression, ForInit, FunctionDeclaration, Label, Program, Statement, StorageClass,
-    Type, TypedExpression, UnaryOp, VarDeclaration,
+    BinaryOp, Block, Expression, ForInit, FunctionDeclaration, Label, Program, Statement,
+    StorageClass, Type, TypedExpression, UnaryOp, VarDeclaration,
 };
 use crate::common::symbol_table::{IdentAttrs, InitValue, InitialValue, SymbolTableEntry};
 use crate::common::symbol_table_generic::SymbolTableRef;
@@ -539,6 +539,8 @@ impl TypeChecker {
                 ));
             }
             BinaryOp::ShiftLeft | BinaryOp::ShiftRight => {
+                Self::check_binary_operand(&left, binary_op)?;
+                Self::check_binary_operand(&right, binary_op)?;
                 return Ok(TypedExpression::with_type(
                     BinaryExpr(binary_op.clone(), Box::new(left.clone()), Box::new(right)),
                     left.get_type(),
@@ -582,13 +584,19 @@ impl TypeChecker {
                     "Cannot apply arithmetic operator to non-number type"
                 ));
             }
-            Type::Double => {
-                if *binary_op == BinaryOp::Remainder {
+            Type::Double => match binary_op {
+                BinaryOp::Remainder
+                | BinaryOp::ShiftLeft
+                | BinaryOp::ShiftRight
+                | BinaryOp::BitAnd
+                | BinaryOp::BitOr
+                | BinaryOp::BitXor => {
                     return Err(anyhow!(
-                        "Cannot apply remainder operator to non-number type"
+                        "Cannot apply operator {binary_op:?} to double type"
                     ));
                 }
-            }
+                _ => {}
+            },
             _ => {}
         }
 
@@ -755,6 +763,111 @@ impl TypeChecker {
             }
         }
     }
+
+    fn visit_return_statement(&mut self, typed_expr: &mut TypedExpression) -> Result<()> {
+        let ret_type = self.get_return_type_of_current_function()?;
+        *typed_expr = Self::convert_to(&self.set_type(typed_expr)?, &ret_type);
+        Ok(())
+    }
+
+    fn visit_expression_statement(&mut self, typed_expr: &mut TypedExpression) -> Result<()> {
+        *typed_expr = self.set_type(typed_expr)?;
+        Ok(())
+    }
+
+    fn visit_while_statement(
+        &mut self,
+        condition: &mut TypedExpression,
+        body: &mut Statement,
+    ) -> Result<()> {
+        *condition = self.set_type(condition)?;
+        body.accept_mut(self)?;
+        Ok(())
+    }
+
+    fn visit_do_while_statement(
+        &mut self,
+        condition: &mut TypedExpression,
+        body: &mut Statement,
+    ) -> Result<()> {
+        body.accept_mut(self)?;
+        *condition = self.set_type(condition)?;
+        Ok(())
+    }
+
+    fn visit_for_statement(
+        &mut self,
+        init: &mut ForInit,
+        condition: &mut Option<TypedExpression>,
+        post: &mut Option<TypedExpression>,
+        body: &mut Statement,
+    ) -> Result<()> {
+        *init = self.set_type_for_init(init)?;
+        if let Some(condition) = condition {
+            *condition = self.set_type(condition)?;
+        }
+        if let Some(post) = post {
+            *post = self.set_type(post)?;
+        }
+        body.accept_mut(self)?;
+        Ok(())
+    }
+
+    fn visit_compound_statement(&mut self, block: &mut Block) -> Result<()> {
+        block.accept_mut(self)?;
+        Ok(())
+    }
+
+    fn visit_if_statement(
+        &mut self,
+        condition: &mut TypedExpression,
+        then_branch: &mut Statement,
+        else_branch: &mut Option<Box<Statement>>,
+    ) -> Result<()> {
+        *condition = self.set_type(condition)?;
+        then_branch.accept_mut(self)?;
+        if let Some(else_branch) = else_branch {
+            else_branch.accept_mut(self)?;
+        }
+        Ok(())
+    }
+
+    fn visit_switch_statement(
+        &mut self,
+        condition: &mut TypedExpression,
+        body: &mut Statement,
+    ) -> Result<()> {
+        *condition = self.set_type(condition)?;
+        let condition_type = condition.get_type();
+        match condition_type {
+            Type::Int | Type::UInt | Type::Long | Type::ULong => {
+                self.switch_condition_types.push(condition_type);
+                body.accept_mut(self)?;
+                self.switch_condition_types.pop();
+                Ok(())
+            }
+            _ => Err(anyhow!(
+                "Invalid switch condition type: {:?}",
+                condition_type
+            )),
+        }
+    }
+
+    fn visit_labeled_statement(
+        &mut self,
+        label: &mut Label,
+        statement: &mut Statement,
+    ) -> Result<()> {
+        if let Label::Case { value, .. } = label {
+            if self.switch_condition_types.is_empty() {
+                return Err(anyhow!("case label not within switch statement"));
+            }
+            let condition_type = self.switch_condition_types.last().unwrap().clone();
+            *value = Self::convert_to(&self.set_type(value)?, &condition_type);
+        }
+        statement.accept_mut(self)?;
+        Ok(())
+    }
 }
 
 impl VisitorMut for TypeChecker {
@@ -830,76 +943,36 @@ impl VisitorMut for TypeChecker {
     fn visit_statement(&mut self, stmt: &mut Statement) -> Result<()> {
         use Statement::*;
         match stmt {
-            Return(typed_expr) => {
-                let ret_type = self.get_return_type_of_current_function()?;
-                *typed_expr = Self::convert_to(&self.set_type(typed_expr)?, &ret_type);
-            }
-            Expression(typed_expr) => {
-                *typed_expr = self.set_type(typed_expr)?;
-            }
+            Return(typed_expr) => self.visit_return_statement(typed_expr)?,
+            Expression(typed_expr) => self.visit_expression_statement(typed_expr)?,
             Null => {}
             Break { .. } => {}
             Continue { .. } => {}
             While {
                 condition, body, ..
-            } => {
-                *condition = self.set_type(condition)?;
-                body.accept_mut(self)?;
-            }
+            } => self.visit_while_statement(condition, body)?,
             DoWhile {
                 condition, body, ..
-            } => {
-                body.accept_mut(self)?;
-                *condition = self.set_type(condition)?;
-            }
+            } => self.visit_do_while_statement(condition, body)?,
             For {
                 init,
                 condition,
                 post,
                 body,
                 ..
-            } => {
-                *init = self.set_type_for_init(init)?;
-                if let Some(condition) = condition {
-                    *condition = self.set_type(condition)?;
-                }
-                if let Some(post) = post {
-                    *post = self.set_type(post)?;
-                }
-                body.accept_mut(self)?;
-            }
-            CompoundStatement(block) => {
-                block.accept_mut(self)?;
-            }
+            } => self.visit_for_statement(init, condition, post, body)?,
+            CompoundStatement(block) => self.visit_compound_statement(block)?,
             IfStatement {
                 condition,
                 then_branch,
                 else_branch,
-            } => {
-                *condition = self.set_type(condition)?;
-                then_branch.accept_mut(self)?;
-                if let Some(else_branch) = else_branch {
-                    else_branch.accept_mut(self)?;
-                }
-            }
+            } => self.visit_if_statement(condition, then_branch, else_branch)?,
             SwitchStatement {
                 condition, body, ..
-            } => {
-                *condition = self.set_type(condition)?;
-                self.switch_condition_types.push(condition.get_type());
-                body.accept_mut(self)?;
-                self.switch_condition_types.pop();
-            }
+            } => self.visit_switch_statement(condition, body)?,
             GotoStatement(..) => {}
             LabeledStatement { label, statement } => {
-                if let Label::Case { value, .. } = label {
-                    if self.switch_condition_types.is_empty() {
-                        return Err(anyhow!("case label not within switch statement"));
-                    }
-                    let condition_type = self.switch_condition_types.last().unwrap().clone();
-                    *value = Self::convert_to(&self.set_type(value)?, &condition_type);
-                }
-                statement.accept_mut(self)?;
+                self.visit_labeled_statement(label, statement)?
             }
         }
         Ok(())
@@ -1032,6 +1105,20 @@ mod tests {
         "#;
 
         check_code(code).expect_err("Expected code to fail for modulo of double");
+    }
+
+    #[test]
+    fn invalid_use_of_compound_shift_for_double() {
+        let code = r#"
+        int main(void) {
+            // Can't perform compound bitwise operations with doubles
+            int i = 1000;
+            i >>= 2.0;
+            return i;
+        }
+        "#;
+
+        check_code(code).expect_err("Expected code to fail for shift of double");
     }
 
     fn check_code(code: &str) -> Result<Program> {
