@@ -4,7 +4,6 @@ use anyhow::Result;
 mod walker;
 pub(crate) mod visitor;
 mod label_resolver;
-mod name_generator;
 mod scope;
 mod identifier_resolver;
 mod loop_labeler;
@@ -16,7 +15,7 @@ use crate::common::symbol_table_generic::SymbolTableRef;
 use crate::semantic::loop_labeler::LoopLabeler;
 pub use identifier_resolver::IdentifierResolver;
 pub use label_resolver::LabelResolver;
-pub use name_generator::{
+pub use crate::common::name_generator::{
     make_label_name_generator, make_temp_var_name_generator, make_var_name_generator,
     NameGeneratorRef,
 };

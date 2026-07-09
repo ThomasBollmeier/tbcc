@@ -1,5 +1,6 @@
 pub mod symbol_table;
 pub mod symbol_table_generic;
+pub mod name_generator;
 
 pub use crate::ast::Type;
 pub use symbol_table::InitValue;

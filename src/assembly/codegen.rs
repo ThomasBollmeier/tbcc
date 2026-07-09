@@ -97,6 +97,7 @@ impl CodeGenerator {
         match assembly_type {
             AssemblyType::Longword => self.operand_4byte_to_string(&operand),
             AssemblyType::Quadword => self.operand_8byte_to_string(&operand),
+            AssemblyType::Double => todo!("handle double type"),
         }
     }
 
@@ -104,6 +105,7 @@ impl CodeGenerator {
         let instruction = match unary_op {
             UnaryOp::Neg => "neg".to_string(),
             UnaryOp::Not => "not".to_string(),
+            UnaryOp::Shr => "shr".to_string(),
         };
         let suffix = self.get_instruction_suffix(assembly_type);
         format!("{}{}", instruction, suffix)
@@ -120,6 +122,7 @@ impl CodeGenerator {
             BinaryOp::ShiftLeft => "shl".to_string(),
             BinaryOp::ShiftRightLogical => "shr".to_string(),
             BinaryOp::ShiftRightArithmetic => "sar".to_string(),
+            BinaryOp::DivDouble => todo!("handle to string conversion for double division"),
         };
         let suffix = self.get_instruction_suffix(assembly_type);
         format!("{}{}", instruction, suffix)
@@ -201,6 +204,7 @@ impl CodeGenerator {
         match assembly_type {
             AssemblyType::Longword => String::from("l"),
             AssemblyType::Quadword => String::from("q"),
+            AssemblyType::Double => todo!("handle double type suffix"),
         }
     }
 }
@@ -290,6 +294,8 @@ impl Visitor for CodeGenerator {
                 self.write_instruction(&format!("movslq \t{src_str}, {dst_str}"));
             }
             Instruction::MovZeroExtend { src: _, dst: _ } => unreachable!("cannot be reached"),
+            Instruction::ConvertIntToDouble { .. } => todo!("handle ConvertIntToDouble instruction"),
+            Instruction::ConvertDoubleToInt { .. } => todo!("handle ConvertDoubleToInt instruction"),
             Instruction::Ret => {
                 self.write_instruction("movq \t%rbp, %rsp");
                 self.write_instruction("popq \t%rbp");
@@ -334,6 +340,7 @@ impl Visitor for CodeGenerator {
             Instruction::Cdq(assembly_type) => match assembly_type {
                 AssemblyType::Longword => self.write_instruction("cdq"),
                 AssemblyType::Quadword => self.write_instruction("cqo"),
+                AssemblyType::Double => todo!("handle double type cdq"),
             },
             Instruction::Cmp {
                 op1,

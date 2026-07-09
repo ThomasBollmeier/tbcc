@@ -1,33 +1,45 @@
-use crate::assembly::ast::AssemblyType::{Longword, Quadword};
+use crate::assembly::ast::AssemblyType::{Double, Longword, Quadword};
 use crate::assembly::ast::Instruction::{Cdq, Idiv};
 use crate::assembly::ast::Operand::Stack;
-use crate::assembly::ast::Register::{CX, DI, DX, R8, R9, SI};
-use crate::assembly::ast::{AssemblyType, ImmValue, StaticVar, TopLevel as TopLevelAsm};
+use crate::assembly::ast::Register::{
+    AX, CX, DI, DX, R8, R9, SI, XMM0, XMM1, XMM2, XMM3, XMM4, XMM5, XMM6, XMM7,
+};
+use crate::assembly::ast::{
+    AssemblyType, ImmValue, StaticConst, StaticVar, TopLevel as TopLevelAsm,
+};
 use crate::assembly::ast::{
     ConditionCode, FuncDef, Instruction, Operand, Program, Register, UnaryOp,
 };
 use crate::assembly::symbol_table::SymbolTableEntry as AsmSymbolTableEntry;
+use crate::ast::Type::{UInt, ULong};
+use crate::common::name_generator::make_static_const_label_generator;
 use crate::common::symbol_table::SymbolTableEntry;
 use crate::common::symbol_table_generic::{SymbolTable, SymbolTableRef};
 use crate::common::{InitValue, Type, symbol_table};
+use crate::semantic::NameGeneratorRef;
 use crate::tacky::ast::{
     BinaryOperator as TackyBinOp, BinaryOperator, Function, Instruction as TackyInstruction,
     StaticVariable, TopLevel, UnaryOperator, Value,
 };
-use anyhow::{anyhow, Result};
-use crate::ast::Type::{Int, Long, UInt, ULong};
+use anyhow::{Result, anyhow};
+use std::collections::HashMap;
 
-#[derive(Debug)]
 pub struct AssemblyCreator {
-    arg_registers: [Register; 6],
+    int_arg_registers: [Register; 6],
+    double_arg_registers: [Register; 8],
     symbol_table: SymbolTableRef<SymbolTableEntry>,
+    static_const_label_gen: NameGeneratorRef,
+    static_consts: HashMap<(Type, String), StaticConst>,
 }
 
 impl AssemblyCreator {
     pub fn new(symbol_table: SymbolTableRef<SymbolTableEntry>) -> AssemblyCreator {
         AssemblyCreator {
-            arg_registers: [DI, SI, DX, CX, R8, R9],
+            int_arg_registers: [DI, SI, DX, CX, R8, R9],
+            double_arg_registers: [XMM0, XMM1, XMM2, XMM3, XMM4, XMM5, XMM6, XMM7],
             symbol_table: symbol_table.clone(),
+            static_const_label_gen: make_static_const_label_generator(),
+            static_consts: HashMap::new(),
         }
     }
 
@@ -49,6 +61,15 @@ impl AssemblyCreator {
             }
         }
 
+        let mut static_constants: Vec<TopLevelAsm> = self
+            .static_consts
+            .values()
+            .map(|static_const| TopLevelAsm::StaticConstant(static_const.clone()))
+            .collect();
+
+        static_constants.extend(top_levels_asm);
+        top_levels_asm = static_constants;
+
         let asm_symbol_table = self.fill_asm_symbol_table();
 
         Ok((Program::new(top_levels_asm), asm_symbol_table))
@@ -67,16 +88,29 @@ impl AssemblyCreator {
                 symbol_table::IdentAttrs::Static { .. } => AsmSymbolTableEntry::Object {
                     assembly_type: Self::map_type_to_asm_type(&entry.c_type),
                     is_static: true,
+                    is_constant: false,
                 },
                 symbol_table::IdentAttrs::Local => AsmSymbolTableEntry::Object {
                     assembly_type: Self::map_type_to_asm_type(&entry.c_type),
                     is_static: false,
+                    is_constant: false,
                 },
             };
 
             asm_symbol_table
                 .borrow_mut()
                 .insert(name.clone(), asm_entry);
+        }
+
+        for static_const in self.static_consts.values() {
+            let asm_entry = AsmSymbolTableEntry::Object {
+                assembly_type: Self::map_init_value_to_asm_type(&static_const.value),
+                is_static: true,
+                is_constant: true,
+            };
+            asm_symbol_table
+                .borrow_mut()
+                .insert(static_const.name.clone(), asm_entry);
         }
 
         asm_symbol_table
@@ -87,7 +121,7 @@ impl AssemblyCreator {
         let alignment = match value {
             InitValue::Int(_) | InitValue::UInt(_) => 4,
             InitValue::Long(_) | InitValue::ULong(_) => 8,
-            InitValue::Double(_) => todo!("double type not supported yet"),
+            InitValue::Double(_) => 8,
         };
 
         Ok(StaticVar {
@@ -99,61 +133,57 @@ impl AssemblyCreator {
     }
 
     fn determine_static_var_value(&self, static_var: &StaticVariable) -> Result<InitValue> {
-        match static_var.c_type {
-            Int => match static_var.initial_value {
-                Value::IntegerConstant(i) => Ok(InitValue::Int(i)),
-                Value::UnsignedIntegerConstant(u) => Ok(InitValue::Int(u as i32)),
-                Value::LongConstant(l) => Ok(InitValue::Int(l as i32)),
-                Value::UnsignedLongConstant(ul) => Ok(InitValue::Int(ul as i32)),
-                _ => Err(anyhow!("invalid initial value of static variable")),
-            },
-            UInt => match static_var.initial_value {
-                Value::IntegerConstant(i) => Ok(InitValue::UInt(i as u32)),
-                Value::UnsignedIntegerConstant(u) => Ok(InitValue::UInt(u)),
-                Value::LongConstant(l) => Ok(InitValue::UInt(l as u32)),
-                Value::UnsignedLongConstant(ul) => Ok(InitValue::UInt(ul as u32)),
-                _ => Err(anyhow!("invalid initial value of static variable")),
-            },
-            Long => match static_var.initial_value {
-                Value::IntegerConstant(i) => Ok(InitValue::Long(i as i64)),
-                Value::UnsignedIntegerConstant(u) => Ok(InitValue::Long(u as i64)),
-                Value::LongConstant(l) => Ok(InitValue::Long(l)),
-                Value::UnsignedLongConstant(ul) => Ok(InitValue::Long(ul as i64)),
-                _ => Err(anyhow!("invalid initial value of static variable")),
-            },
-            ULong => match static_var.initial_value {
-                Value::IntegerConstant(i) => Ok(InitValue::ULong(i as u64)),
-                Value::UnsignedIntegerConstant(u) => Ok(InitValue::ULong(u as u64)),
-                Value::LongConstant(l) => Ok(InitValue::ULong(l as u64)),
-                Value::UnsignedLongConstant(ul) => Ok(InitValue::ULong(ul)),
-                _ => Err(anyhow!("invalid initial value of static variable")),
-            },
-            _ => Err(anyhow!("Unsupported type for static variable: {:?}", static_var.c_type)),
+        match static_var.initial_value {
+            Value::IntegerConstant(i) => Ok(InitValue::Int(i)),
+            Value::UnsignedIntegerConstant(u) => Ok(InitValue::UInt(u)),
+            Value::LongConstant(l) => Ok(InitValue::Long(l)),
+            Value::UnsignedLongConstant(ul) => Ok(InitValue::ULong(ul)),
+            Value::DoubleConstant(d) => Ok(InitValue::Double(d)),
+            _ => Err(anyhow!("invalid initial value of static variable")),
         }
     }
 
     fn create_func_def(&mut self, func_def: &Function) -> Result<FuncDef> {
         let name = func_def.name.clone();
-        let num_arg_regs = self.arg_registers.len();
-        let mut instructions = vec![];
+        let func_type = self.lookup_function_type(&name)?;
+        let param_types = func_type.0;
 
-        // Copy arguments into pseudo-registers:
-        for (idx, param) in func_def.parameters.iter().enumerate() {
-            let src = if idx < num_arg_regs {
-                Operand::Register(self.arg_registers[idx].clone())
-            } else {
-                let offset = (idx - num_arg_regs) * 8 + 16;
-                Stack(offset as i32)
-            };
+        let (int_reg_params, double_reg_params, stack_params) =
+            self.split_items(&param_types, &func_def.parameters)?;
 
+        let mut moves = vec![];
+
+        for (idx, param) in int_reg_params.iter().enumerate() {
             let assembly_type = self.lookup_asm_type(param);
+            let src = Operand::Register(self.int_arg_registers[idx].clone());
             let dst = Operand::PseudoReg(param.clone());
-            instructions.push(Instruction::Mov {
-                assembly_type,
-                src,
-                dst,
-            });
+            moves.push((assembly_type, src, dst));
         }
+
+        for (idx, param) in double_reg_params.iter().enumerate() {
+            let assembly_type = self.lookup_asm_type(param);
+            let src = Operand::Register(self.double_arg_registers[idx].clone());
+            let dst = Operand::PseudoReg(param.clone());
+            moves.push((assembly_type, src, dst));
+        }
+
+        let mut offset = 16;
+        for param in &stack_params {
+            let assembly_type = self.lookup_asm_type(param);
+            let src = Stack(offset);
+            offset += 8;
+            let dst = Operand::PseudoReg(param.clone());
+            moves.push((assembly_type, src, dst));
+        }
+
+        let mut instructions: Vec<Instruction> = moves
+            .iter()
+            .map(|(assembly_type, src, dst)| Instruction::Mov {
+                assembly_type: assembly_type.clone(),
+                src: src.clone(),
+                dst: dst.clone(),
+            })
+            .collect();
 
         instructions.extend(self.create_instructions(&func_def.body)?);
 
@@ -233,23 +263,14 @@ impl AssemblyCreator {
         use Register::*;
 
         const ARG_SIZE: usize = 8;
-        let num_arg_registers = self.arg_registers.len();
 
-        let (register_args, stack_args) = if arguments.len() <= num_arg_registers {
-            (arguments.clone(), vec![])
-        } else {
-            let register_args = arguments
-                .iter()
-                .take(num_arg_registers)
-                .cloned()
-                .collect::<Vec<_>>();
-            let stack_args = arguments
-                .iter()
-                .skip(num_arg_registers)
-                .cloned()
-                .collect::<Vec<_>>();
-            (register_args, stack_args)
-        };
+        let (param_types, _) = self
+            .lookup_function_type(name)
+            .expect("function type not found");
+
+        let (int_reg_args, double_reg_args, stack_args) = self
+            .split_items(&param_types, arguments)
+            .expect("invalid arguments");
 
         let stack_padding = if stack_args.len() % 2 == 0 { 0 } else { 8 };
 
@@ -258,11 +279,12 @@ impl AssemblyCreator {
         }
 
         // System V calling convention:
-        // First 6 arguments into registers
-        for (reg_index, arg) in register_args.iter().enumerate() {
+
+        // First 6 integer arguments into registers
+        for (reg_index, arg) in int_reg_args.iter().enumerate() {
             let assembly_type = self.get_asm_type(arg);
             let src = self.create_operand(arg);
-            let dst = Operand::Register(self.arg_registers[reg_index].clone());
+            let dst = Operand::Register(self.int_arg_registers[reg_index].clone());
             instructions.push(Instruction::Mov {
                 assembly_type,
                 src,
@@ -270,26 +292,38 @@ impl AssemblyCreator {
             });
         }
 
+        // First 8 double arguments into registers
+        for (reg_index, arg) in double_reg_args.iter().enumerate() {
+            let src = self.create_operand(arg);
+            let dst = Operand::Register(self.double_arg_registers[reg_index].clone());
+            instructions.push(Instruction::Mov {
+                assembly_type: Double,
+                src,
+                dst,
+            });
+        }
+
         // Remaining arguments pushed onto stack
         for arg in stack_args.iter().rev() {
-            let is_quadword = self.get_asm_type(arg) == Quadword;
+            let assembly_type = self.get_asm_type(arg);
             let op = self.create_operand(arg);
             match op {
                 Operand::Register(_) | Operand::Immediate(_) => {
                     instructions.push(Instruction::Push(op));
                 }
-                _ => {
-                    if is_quadword {
+                _ => match assembly_type {
+                    Quadword | Double => {
                         instructions.push(Instruction::Push(op));
-                    } else {
+                    }
+                    _ => {
                         instructions.push(Instruction::Mov {
-                            assembly_type: Longword,
+                            assembly_type,
                             src: op,
                             dst: Operand::Register(AX),
                         });
                         instructions.push(Instruction::Push(Operand::Register(AX)));
                     }
-                }
+                },
             }
         }
 
@@ -303,11 +337,81 @@ impl AssemblyCreator {
 
         // Set return value:
         let assembly_type = self.get_asm_type(dst);
+        let src = Self::get_return_register(&assembly_type);
+        let dst = self.create_operand(dst);
         instructions.push(Instruction::Mov {
             assembly_type,
-            src: Operand::Register(AX),
-            dst: self.create_operand(dst),
+            src,
+            dst,
         });
+    }
+
+    fn get_return_register(assembly_type: &AssemblyType) -> Operand {
+        if *assembly_type == Double {
+            Operand::Register(XMM0)
+        } else {
+            Operand::Register(AX)
+        }
+    }
+
+    fn split_items<T: Clone>(
+        &self,
+        param_types: &[Type],
+        items: &Vec<T>,
+    ) -> Result<(Vec<T>, Vec<T>, Vec<T>)> {
+        if param_types.len() != items.len() {
+            return Err(anyhow!("number of parameters and items do not match"));
+        }
+
+        let num_int_regs = self.int_arg_registers.len();
+        let num_double_regs = self.double_arg_registers.len();
+        let mut int_reg_items = Vec::new();
+        let mut double_reg_items = Vec::new();
+        let mut stack_items = Vec::new();
+
+        for (param_type, item) in param_types.iter().zip(items) {
+            match param_type {
+                Type::Int | UInt | Type::Long | ULong => {
+                    if int_reg_items.len() < num_int_regs {
+                        int_reg_items.push(item.clone());
+                    } else {
+                        stack_items.push(item.clone());
+                    }
+                }
+                Type::Double => {
+                    if double_reg_items.len() < num_double_regs {
+                        double_reg_items.push(item.clone());
+                    } else {
+                        stack_items.push(item.clone());
+                    }
+                }
+                _ => {
+                    return Err(anyhow!("unsupported parameter type"));
+                }
+            }
+        }
+
+        Ok((int_reg_items, double_reg_items, stack_items))
+    }
+
+    fn lookup_type(&self, name: &str) -> Result<Type> {
+        self.symbol_table
+            .borrow()
+            .get_entry(name)
+            .map(|entry| entry.c_type.clone())
+            .ok_or_else(|| anyhow!("symbol not found: {}", name))
+    }
+
+    fn lookup_function_type(&self, func_name: &str) -> Result<(Vec<Type>, Box<Type>)> {
+        if let Type::Function {
+            param_types,
+            return_type,
+        } = self.lookup_type(func_name)?
+        {
+            Ok((param_types, return_type))
+        } else {
+            Err(anyhow!("{func_name} is not a function"))
+        }
     }
 
     fn push_return(&mut self, instructions: &mut Vec<Instruction>, value: &Value) {
@@ -315,10 +419,11 @@ impl AssemblyCreator {
 
         let assembly_type = self.get_asm_type(value);
         let src = self.create_operand(value);
+        let dst = Self::get_return_register(&assembly_type);
         instructions.push(Mov {
             assembly_type,
             src,
-            dst: Operand::Register(Register::AX),
+            dst,
         });
         instructions.push(Ret);
     }
@@ -412,14 +517,14 @@ impl AssemblyCreator {
         instructions.push(Mov {
             assembly_type: assembly_type.clone(),
             src: src1_op,
-            dst: Operand::Register(Register::AX),
+            dst: Operand::Register(AX),
         });
 
         self.push_div(instructions, &assembly_type, src1, &src2_op);
 
         instructions.push(Mov {
             assembly_type,
-            src: Operand::Register(Register::AX),
+            src: Operand::Register(AX),
             dst: dst_op,
         });
     }
@@ -472,7 +577,7 @@ impl AssemblyCreator {
         instructions.push(Mov {
             assembly_type: assembly_type.clone(),
             src: src1_op,
-            dst: Operand::Register(Register::AX),
+            dst: Operand::Register(AX),
         });
 
         self.push_div(instructions, &assembly_type, src1, &src2_op);
@@ -625,9 +730,31 @@ impl AssemblyCreator {
             Value::UnsignedIntegerConstant(u) => Operand::Immediate(ImmValue::UInt(*u)),
             Value::LongConstant(l) => Operand::Immediate(ImmValue::Long(*l)),
             Value::UnsignedLongConstant(ul) => Operand::Immediate(ImmValue::ULong(*ul)),
-            Value::DoubleConstant(_) => todo!("double type not supported yet"),
+            Value::DoubleConstant(dbl) => self.create_double_constant_operand(*dbl),
             Value::Variable(name) => Operand::PseudoReg(name.clone()),
         }
+    }
+
+    fn create_double_constant_operand(&mut self, value: f64) -> Operand {
+        let key = (Type::Double, format!("{value}"));
+
+        let name = if self.static_consts.contains_key(&key) {
+            let static_const = self.static_consts.get(&key).unwrap();
+            static_const.name.clone()
+        } else {
+            let name = self
+                .static_const_label_gen
+                .borrow_mut()
+                .make_unique_name("");
+            let static_const = StaticConst {
+                name: name.clone(),
+                value: InitValue::Double(value),
+                alignment: 8,
+            };
+            self.static_consts.insert(key, static_const);
+            name
+        };
+        Operand::Data(name)
     }
 
     fn map_unary_operator(&self, unary_op: &UnaryOperator) -> UnaryOp {
@@ -639,7 +766,11 @@ impl AssemblyCreator {
         }
     }
 
-    fn map_binary_operator(&self, binary_op: &TackyBinOp, is_unsigned: bool) -> crate::assembly::ast::BinaryOp {
+    fn map_binary_operator(
+        &self,
+        binary_op: &TackyBinOp,
+        is_unsigned: bool,
+    ) -> crate::assembly::ast::BinaryOp {
         use crate::tacky::ast::BinaryOperator::*;
         match binary_op {
             Add => crate::assembly::ast::BinaryOp::Add,
@@ -649,10 +780,12 @@ impl AssemblyCreator {
             BitOr => crate::assembly::ast::BinaryOp::BitOr,
             BitXor => crate::assembly::ast::BinaryOp::BitXor,
             ShiftLeft => crate::assembly::ast::BinaryOp::ShiftLeft,
-            ShiftRight => if is_unsigned {
-                crate::assembly::ast::BinaryOp::ShiftRightLogical
-            } else {
-                crate::assembly::ast::BinaryOp::ShiftRightArithmetic
+            ShiftRight => {
+                if is_unsigned {
+                    crate::assembly::ast::BinaryOp::ShiftRightLogical
+                } else {
+                    crate::assembly::ast::BinaryOp::ShiftRightArithmetic
+                }
             }
             Divide => unreachable!(),
             Remainder => unreachable!(),
@@ -694,7 +827,16 @@ impl AssemblyCreator {
         match c_type {
             Int | UInt => Longword,
             Long | ULong => Quadword,
+            Double => AssemblyType::Double,
             _ => unimplemented!("unsupported type {:?}", c_type),
+        }
+    }
+
+    fn map_init_value_to_asm_type(value: &InitValue) -> AssemblyType {
+        match value {
+            InitValue::Int(_) | InitValue::UInt(_) => Longword,
+            InitValue::Long(_) | InitValue::ULong(_) => Quadword,
+            InitValue::Double(_) => Double,
         }
     }
 
@@ -711,7 +853,7 @@ impl AssemblyCreator {
             Value::UnsignedIntegerConstant(_) => Longword,
             Value::LongConstant(_) => Quadword,
             Value::UnsignedLongConstant(_) => Quadword,
-            Value::DoubleConstant(_) => todo!("double type not supported yet"),
+            Value::DoubleConstant(_) => Double,
             Value::Variable(name) => self.lookup_asm_type(name),
         }
     }
@@ -752,8 +894,8 @@ mod tests {
     use super::*;
     use crate::assembly::ast::{
         BinaryOp as AsmBinaryOp, Instruction as AsmInstruction, Operand as AsmOperand,
-        Register as AsmRegister,
     };
+    use crate::common::Type::Int;
     use crate::common::symbol_table::IdentAttrs;
     use crate::lexer::Lexer;
     use crate::parser::Parser;
@@ -816,11 +958,12 @@ mod tests {
             .expect("Failed to emit");
 
         let mut assembly_creator = AssemblyCreator::new(symbol_table);
-        let (assembly_program, _) = assembly_creator
+        let (assembly_program, asm_symbol_table) = assembly_creator
             .create_program(&tacky_program)
             .expect("Failed to create assembly program");
 
         dbg!(&assembly_program);
+        dbg!(&asm_symbol_table);
     }
 
     #[test]
@@ -990,6 +1133,17 @@ mod tests {
     }
 
     #[test]
+    fn creates_asm_program_with_double_addition() {
+        let code = r#"
+        double increment(double x) {
+            return x + 1.0;
+        }
+        "#;
+
+        run_code(code);
+    }
+
+    #[test]
     fn creates_asm_program_with_binary_ops() {
         let symbol_table: SymbolTableRef<SymbolTableEntry> = SymbolTable::new_ref();
 
@@ -1003,6 +1157,20 @@ mod tests {
                 },
             );
         }
+
+        symbol_table.borrow_mut().insert(
+            "main",
+            SymbolTableEntry {
+                c_type: Type::Function {
+                    return_type: Box::new(Int),
+                    param_types: vec![],
+                },
+                attrs: IdentAttrs::Function {
+                    is_defined: true,
+                    is_global: true,
+                },
+            },
+        );
 
         let tacky_program = TackyProgram(vec![TopLevel::Function(TackyFunctionDef {
             name: "main".to_string(),
@@ -1116,7 +1284,7 @@ mod tests {
             AsmInstruction::Mov {
                 assembly_type: Longword,
                 src: AsmOperand::PseudoReg(name),
-                dst: AsmOperand::Register(AsmRegister::AX)
+                dst: AsmOperand::Register(AX)
             } if name == "tmp.2"
         ));
         assert!(matches!(&instructions[7], Cdq(Longword)));
@@ -1131,7 +1299,7 @@ mod tests {
             &instructions[9],
             AsmInstruction::Mov {
                 assembly_type: Longword,
-                src: AsmOperand::Register(AsmRegister::AX),
+                src: AsmOperand::Register(AX),
                 dst: AsmOperand::PseudoReg(name)
             } if name == "tmp.3"
         ));
@@ -1141,7 +1309,7 @@ mod tests {
             AsmInstruction::Mov {
                 assembly_type: Longword,
                 src: AsmOperand::PseudoReg(name),
-                dst: AsmOperand::Register(AsmRegister::AX)
+                dst: AsmOperand::Register(AX)
             } if name == "tmp.3"
         ));
         assert!(matches!(&instructions[11], Cdq(Longword)));
@@ -1166,7 +1334,7 @@ mod tests {
             AsmInstruction::Mov {
                 assembly_type: Longword,
                 src: AsmOperand::PseudoReg(name),
-                dst: AsmOperand::Register(AsmRegister::AX)
+                dst: AsmOperand::Register(AX)
             } if name == "tmp.4"
         ));
         assert!(matches!(&instructions[15], AsmInstruction::Ret));

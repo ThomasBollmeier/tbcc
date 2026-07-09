@@ -1,7 +1,7 @@
 use crate::ast::{
     Block, Expression, FunctionDeclaration, Program, Statement, StorageClass, VarDeclaration,
 };
-use crate::semantic::name_generator::NameGeneratorRef;
+use crate::common::name_generator::NameGeneratorRef;
 use crate::semantic::scope::{ResolutionStrategy, Scope, ScopeRef};
 use crate::semantic::walker;
 use crate::semantic::walker::WalkerMut;
@@ -242,7 +242,7 @@ mod tests {
     use crate::ast::{BlockItem, Declaration, Expression, Statement, TypedExpression};
     use crate::lexer::Lexer;
     use crate::parser::Parser;
-    use crate::semantic::name_generator::make_var_name_generator;
+    use crate::common::name_generator::make_var_name_generator;
 
     #[test]
     fn resolves_variable_names_in_declarations_and_usages() {

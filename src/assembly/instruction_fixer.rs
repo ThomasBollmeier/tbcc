@@ -244,6 +244,7 @@ impl InstructionFixer {
                     }
                 }
             }
+            BinaryOp::DivDouble => todo!("DivDouble is not implemented in InstructionFixer yet"),
         }
     }
 

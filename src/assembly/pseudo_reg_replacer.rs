@@ -53,6 +53,7 @@ impl PseudoRegReplacer {
                             self.last_offset -= 8 - remainder.abs();
                         }
                     }
+                    AssemblyType::Double => todo!("handle double type for variable {var_name}"),
                 }
             }
             _ => panic!("expected object entry for variable {var_name}"),
@@ -194,6 +195,7 @@ mod tests {
                 SymbolTableEntry::Object {
                     assembly_type: asm_type.clone(),
                     is_static: false,
+                    is_constant: false,
                 },
             );
         }

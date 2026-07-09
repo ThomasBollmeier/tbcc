@@ -17,6 +17,7 @@ impl Program {
             match top_level {
                 TopLevel::Function(func_def) => Self::walk_func_def(func_def, visitor),
                 TopLevel::StaticVariable(static_var) => Self::walk_static_var(static_var, visitor),
+                TopLevel::StaticConstant(static_const  ) => Self::walk_static_const(static_const, visitor),
             }
         }
         visitor.exit_program(self);
@@ -28,6 +29,7 @@ impl Program {
             match top_level {
                 TopLevel::Function(func_def) => Self::walk_func_def_mut(func_def, visitor),
                 TopLevel::StaticVariable(static_var) => Self::walk_static_var_mut(static_var, visitor),
+                TopLevel::StaticConstant(static_const) => Self::walk_static_const_mut(static_const, visitor),
             }
         }
         visitor.exit_program(self);
@@ -45,6 +47,10 @@ impl Program {
 
     fn walk_static_var_mut(static_var: &mut StaticVar, visitor: &mut impl VisitorMut) {
         visitor.visit_static_var(static_var);
+    }
+
+    fn walk_static_const_mut(static_const: &mut StaticConst, visitor: &mut impl VisitorMut) {
+        visitor.visit_static_const(static_const);
     }
 
     fn walk_instruction_mut(instruction: &mut Instruction, visitor: &mut impl VisitorMut) {
@@ -65,6 +71,10 @@ impl Program {
         visitor.visit_static_var(static_var);
     }
 
+    fn walk_static_const(static_const: &StaticConst, visitor: &mut impl Visitor) {
+        visitor.visit_static_const(static_const);
+    }
+
     fn walk_instruction(instruction: &Instruction, visitor: &mut impl Visitor) {
         visitor.visit_instruction(instruction);
     }
@@ -74,6 +84,7 @@ impl Program {
 pub enum TopLevel {
     Function(FuncDef),
     StaticVariable(StaticVar),
+    StaticConstant(StaticConst),
 }
 
 #[derive(Debug)]
@@ -103,10 +114,18 @@ pub struct StaticVar {
     pub alignment: i32,
 }
 
+#[derive(Debug, Clone)]
+pub struct StaticConst {
+    pub name: String,
+    pub value: InitValue,
+    pub alignment: i32,
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum AssemblyType {
     Longword,
     Quadword,
+    Double,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -121,6 +140,16 @@ pub enum Instruction {
         dst: Operand,
     },
     MovZeroExtend {
+        src: Operand,
+        dst: Operand,
+    },
+    ConvertDoubleToInt {
+        dst_type: AssemblyType,
+        src: Operand,
+        dst: Operand,
+    },
+    ConvertIntToDouble {
+        src_type: AssemblyType,
         src: Operand,
         dst: Operand,
     },
@@ -211,12 +240,14 @@ pub enum BinaryOp {
     ShiftLeft,
     ShiftRightLogical,
     ShiftRightArithmetic,
+    DivDouble,
 }
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum UnaryOp {
     Neg,
     Not,
+    Shr,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -231,6 +262,16 @@ pub enum Register {
     R10,
     R11,
     SP,
+    XMM0,
+    XMM1,
+    XMM2,
+    XMM3,
+    XMM4,
+    XMM5,
+    XMM6,
+    XMM7,
+    XMM14,
+    XMM15,
 }
 
 #[allow(unused_variables)]
@@ -240,6 +281,7 @@ pub trait Visitor {
     fn enter_func_def(&mut self, func_def: &FuncDef) {}
     fn exit_func_def(&mut self, func_def: &FuncDef) {}
     fn visit_static_var(&mut self, static_var: &StaticVar) {}
+    fn visit_static_const(&mut self, static_const: &StaticConst) {}
     fn visit_instruction(&mut self, instruction: &Instruction) {}
 }
 
@@ -250,5 +292,6 @@ pub trait VisitorMut {
     fn enter_func_def(&mut self, func_def: &mut FuncDef) {}
     fn exit_func_def(&mut self, func_def: &mut FuncDef) {}
     fn visit_static_var(&mut self, static_var: &mut StaticVar) {}
+    fn visit_static_const(&mut self, static_const: &mut StaticConst) {}
     fn visit_instruction(&mut self, instruction: &mut Instruction) {}
 }

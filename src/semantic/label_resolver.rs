@@ -1,5 +1,5 @@
 use crate::ast::{FunctionDeclaration, Label, Program, Statement};
-use crate::semantic::name_generator::NameGeneratorRef;
+use crate::common::name_generator::NameGeneratorRef;
 use crate::semantic::scope::{ResolutionStrategy, Scope, ScopeRef};
 use crate::semantic::walker;
 use crate::semantic::walker::WalkerMut;
@@ -196,7 +196,7 @@ mod tests {
     use crate::lexer::Lexer;
     use crate::parser::Parser;
     use crate::semantic::IdentifierResolver;
-    use crate::semantic::name_generator;
+    use crate::common::name_generator;
 
     #[test]
     fn resolves_label_used_after_if_branch_declaration() {

@@ -1,4 +1,4 @@
-use crate::semantic::name_generator::NameGeneratorRef;
+use crate::common::name_generator::NameGeneratorRef;
 use anyhow::Result;
 use std::cell::RefCell;
 use std::collections::HashMap;

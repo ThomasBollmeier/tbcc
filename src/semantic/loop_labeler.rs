@@ -1,9 +1,10 @@
 use crate::ast::{Expression, Label, Statement, Type, TypedExpression};
 use crate::semantic::walker;
 use crate::semantic::walker::WalkerMut;
-use crate::semantic::{NameGeneratorRef, name_generator};
+use crate::semantic::NameGeneratorRef;
 use anyhow::Result;
 use std::collections::HashSet;
+use crate::common::name_generator;
 
 pub struct LoopLabeler {
     loop_id_generator: NameGeneratorRef,
@@ -216,8 +217,8 @@ enum TargetId {
 mod tests {
     use super::*;
     use crate::ast::{
-        Block, BlockItem, Declaration, Expression, FunctionDeclaration, Label, Program, Statement,
-        Type, typed,
+        typed, Block, BlockItem, Declaration, Expression, FunctionDeclaration, Label, Program,
+        Statement, Type,
     };
     use crate::common::symbol_table_generic::SymbolTable;
     use crate::lexer::Lexer;

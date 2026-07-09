@@ -5,6 +5,7 @@ pub enum SymbolTableEntry {
     Object {
         assembly_type: AssemblyType,
         is_static: bool,
+        is_constant: bool,
     },
     Function {
         is_defined: bool,
@@ -24,6 +25,7 @@ mod tests {
         let entry = SymbolTableEntry::Object {
             assembly_type: AssemblyType::Longword,
             is_static: false,
+            is_constant: false,
         };
         symbol_table.borrow_mut().insert("tmp.0", entry.clone());
 
@@ -45,6 +47,7 @@ mod tests {
         symbol_table.borrow_mut().insert("b", SymbolTableEntry::Object {
             assembly_type: AssemblyType::Quadword,
             is_static: true,
+            is_constant: false,
         });
 
         symbol_table.borrow_mut().clear();
