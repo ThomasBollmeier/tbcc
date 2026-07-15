@@ -1,5 +1,6 @@
 use crate::assembly::ast::AssemblyType::{Double, Longword, Quadword};
-use crate::assembly::ast::Instruction::{Cdq, Idiv};
+use crate::assembly::ast::BinaryOp::{BitXor, DivDouble};
+use crate::assembly::ast::Instruction::{Binary, Cdq, Cmp, Idiv, Mov, SetCC};
 use crate::assembly::ast::Operand::Stack;
 use crate::assembly::ast::Register::{
     AX, CX, DI, DX, R8, R9, SI, XMM0, XMM1, XMM2, XMM3, XMM4, XMM5, XMM6, XMM7,
@@ -484,6 +485,21 @@ impl AssemblyCreator {
         use crate::assembly::ast::Instruction::*;
 
         let assembly_type = self.get_asm_type(src);
+
+        if assembly_type == Double {
+            match op {
+                UnaryOperator::Not => {
+                    self.push_unary_double_not(instructions, src, dst);
+                    return;
+                }
+                UnaryOperator::Negate => {
+                    self.push_unary_double_negate(instructions, src, dst);
+                    return;
+                }
+                _ => {}
+            }
+        }
+
         let src_op = self.create_operand(src);
         let dst_op = self.create_operand(dst);
         let unary_op = self.map_unary_operator(op);
@@ -500,6 +516,61 @@ impl AssemblyCreator {
         });
     }
 
+    fn push_unary_double_not(
+        &mut self,
+        instructions: &mut Vec<Instruction>,
+        src: &Value,
+        dst: &Value,
+    ) {
+        let reg = Operand::Register(Register::XMM14);
+        let src_op = self.create_operand(src);
+        let dst_op = self.create_operand(dst);
+        let dst_type = self.get_asm_type(dst);
+
+        instructions.push(Binary {
+            assembly_type: Double,
+            op: BitXor,
+            left: reg.clone(),
+            right: reg.clone(),
+        });
+        instructions.push(Cmp {
+            assembly_type: Double,
+            op1: src_op,
+            op2: reg,
+        });
+        instructions.push(Mov {
+            assembly_type: dst_type,
+            src: Operand::Immediate(ImmValue::Int(0)),
+            dst: dst_op.clone(),
+        });
+        instructions.push(SetCC(ConditionCode::Eq, dst_op));
+    }
+
+    fn push_unary_double_negate(
+        &mut self,
+        instructions: &mut Vec<Instruction>,
+        src: &Value,
+        dst: &Value,
+    ) {
+        let src_op = self.create_operand(src);
+        let dst_op = self.create_operand(dst);
+
+        instructions.push(Mov {
+            assembly_type: Double,
+            src: src_op,
+            dst: dst_op.clone(),
+        });
+
+        let negative_zero = self.create_double_constant_operand_with_key("negative_zero", -0.0);
+
+        instructions.push(Binary {
+            assembly_type: Double,
+            op: BitXor,
+            left: negative_zero,
+            right: dst_op.clone(),
+        });
+    }
+
     fn push_binary_divide(
         &mut self,
         instructions: &mut Vec<Instruction>,
@@ -513,6 +584,21 @@ impl AssemblyCreator {
         let src1_op = self.create_operand(src1);
         let src2_op = self.create_operand(src2);
         let dst_op = self.create_operand(dst);
+
+        if assembly_type == Double {
+            instructions.push(Mov {
+                assembly_type: assembly_type.clone(),
+                src: src1_op,
+                dst: dst_op.clone(),
+            });
+            instructions.push(Binary {
+                assembly_type,
+                op: DivDouble,
+                left: src2_op,
+                right: dst_op,
+            });
+            return;
+        }
 
         instructions.push(Mov {
             assembly_type: assembly_type.clone(),
@@ -736,10 +822,14 @@ impl AssemblyCreator {
     }
 
     fn create_double_constant_operand(&mut self, value: f64) -> Operand {
-        let key = (Type::Double, format!("{value}"));
+        let key = format!("{value}");
+        self.create_double_constant_operand_with_key(&key, value)
+    }
 
-        let name = if self.static_consts.contains_key(&key) {
-            let static_const = self.static_consts.get(&key).unwrap();
+    fn create_double_constant_operand_with_key(&mut self, key: &str, value: f64) -> Operand {
+        let key = (Type::Double, key.to_string());
+
+        let name = if let Some(static_const) = self.static_consts.get(&key) {
             static_const.name.clone()
         } else {
             let name = self
