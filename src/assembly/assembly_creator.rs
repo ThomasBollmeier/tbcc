@@ -460,15 +460,22 @@ impl AssemblyCreator {
     fn push_unary_not(&mut self, instructions: &mut Vec<Instruction>, src: &Value, dst: &Value) {
         use crate::assembly::ast::Instruction::*;
 
+        let assembly_type = self.get_asm_type(dst);
+
+        if assembly_type == Double {
+            self.push_unary_double_not(instructions, src, dst);
+            return;
+        }
+
         let src_op = self.create_operand(src);
         let dst_op = self.create_operand(dst);
         instructions.push(Cmp {
-            assembly_type: self.get_asm_type(src),
+            assembly_type: assembly_type.clone(),
             op1: Operand::Immediate(ImmValue::Int(0)),
             op2: src_op,
         });
         instructions.push(Mov {
-            assembly_type: self.get_asm_type(dst),
+            assembly_type,
             src: Operand::Immediate(ImmValue::Int(0)),
             dst: dst_op.clone(),
         });
@@ -488,10 +495,6 @@ impl AssemblyCreator {
 
         if assembly_type == Double {
             match op {
-                UnaryOperator::Not => {
-                    self.push_unary_double_not(instructions, src, dst);
-                    return;
-                }
                 UnaryOperator::Negate => {
                     self.push_unary_double_negate(instructions, src, dst);
                     return;
