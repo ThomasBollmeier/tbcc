@@ -83,7 +83,7 @@ fn compile_file(source_file: &str, options: &Options) -> Result<Option<String>> 
 
     let tmp_var_name_generator = semantic::make_temp_var_name_generator();
     let mut tacky_emitter = TackyEmitter::new(
-        label_name_generator,
+        label_name_generator.clone(),
         tmp_var_name_generator,
         symbol_table.clone(),
     );
@@ -93,7 +93,8 @@ fn compile_file(source_file: &str, options: &Options) -> Result<Option<String>> 
         return Ok(None);
     }
 
-    let (asm_program, asm_symbol_table) = assembly::create_program(&tacky_program, symbol_table.clone())?;
+    let (asm_program, asm_symbol_table) =
+        assembly::create_program(&tacky_program, symbol_table.clone(), label_name_generator)?;
 
     if options.codegen {
         return Ok(None);

@@ -579,12 +579,12 @@ mod tests {
         .expect("Semantic validation failed");
 
         let mut tacky_emitter =
-            TackyEmitter::new(label_name_gen, tmp_var_name_gen, symbol_table.clone());
+            TackyEmitter::new(label_name_gen.clone(), tmp_var_name_gen, symbol_table.clone());
         let tacky_program = tacky_emitter
             .emit_program(&program)
             .expect("Failed to emit tacky program");
 
-        assembly::create_program(&tacky_program, symbol_table)
+        assembly::create_program(&tacky_program, symbol_table, label_name_gen)
             .expect("Failed to create assembly program")
     }
 }
