@@ -45,7 +45,7 @@ impl PseudoRegReplacer {
             SymbolTableEntry::Object { assembly_type, .. } => {
                 match assembly_type {
                     AssemblyType::Longword => self.last_offset -= 4,
-                    AssemblyType::Quadword => {
+                    AssemblyType::Quadword | AssemblyType::Double => {
                         self.last_offset -= 8;
                         // Round last offset down to next multiple of 8:
                         let remainder = self.last_offset % 8;
@@ -53,7 +53,6 @@ impl PseudoRegReplacer {
                             self.last_offset -= 8 - remainder.abs();
                         }
                     }
-                    AssemblyType::Double => todo!("handle double type for variable {var_name}"),
                 }
             }
             _ => panic!("expected object entry for variable {var_name}"),
@@ -153,6 +152,22 @@ impl VisitorMut for PseudoRegReplacer {
             Push(operand) => {
                 if let Some(new_operand) = self.replace_operand(operand) {
                     *operand = new_operand;
+                }
+            }
+            ConvertIntToDouble { src, dst, .. } => {
+                if let Some(new_src) = self.replace_operand(src) {
+                    *src = new_src;
+                }
+                if let Some(new_dst) = self.replace_operand(dst) {
+                    *dst = new_dst;
+                }
+            }
+            ConvertDoubleToInt { src, dst, .. } => {
+                if let Some(new_src) = self.replace_operand(src) {
+                    *src = new_src;
+                }
+                if let Some(new_dst) = self.replace_operand(dst) {
+                    *dst = new_dst;
                 }
             }
             _ => {}
