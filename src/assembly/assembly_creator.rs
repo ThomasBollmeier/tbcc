@@ -1,11 +1,16 @@
 use crate::assembly::ast::AssemblyType::{Double, Longword, Quadword};
 use crate::assembly::ast::BinaryOp::{BitXor, DivDouble};
-use crate::assembly::ast::Instruction::{Binary, Cdq, Cmp, ConvertDoubleToInt, ConvertIntToDouble, Idiv, Jmp, JmpCC, Label, Mov, MovZeroExtend, SetCC, Unary};
+use crate::assembly::ast::Instruction::{
+    Binary, Cdq, Cmp, ConvertDoubleToInt, ConvertIntToDouble, Idiv, Jmp, JmpCC, Label, Mov,
+    MovZeroExtend, SetCC, Unary,
+};
 use crate::assembly::ast::Operand::{Immediate, Stack};
 use crate::assembly::ast::Register::{
     AX, CX, DI, DX, R8, R9, SI, XMM0, XMM1, XMM2, XMM3, XMM4, XMM5, XMM6, XMM7,
 };
-use crate::assembly::ast::{AssemblyType, BinaryOp, ImmValue, StaticConst, StaticVar, TopLevel as TopLevelAsm};
+use crate::assembly::ast::{
+    AssemblyType, BinaryOp, ImmValue, StaticConst, StaticVar, TopLevel as TopLevelAsm,
+};
 use crate::assembly::ast::{
     ConditionCode, FuncDef, Instruction, Operand, Program, Register, UnaryOp,
 };
@@ -14,13 +19,13 @@ use crate::ast::Type::{UInt, ULong};
 use crate::common::name_generator::make_static_const_label_generator;
 use crate::common::symbol_table::SymbolTableEntry;
 use crate::common::symbol_table_generic::{SymbolTable, SymbolTableRef};
-use crate::common::{symbol_table, InitValue, Type};
+use crate::common::{InitValue, Type, symbol_table};
 use crate::semantic::NameGeneratorRef;
 use crate::tacky::ast::{
     BinaryOperator as TackyBinOp, BinaryOperator, Function, Instruction as TackyInstruction,
     StaticVariable, TopLevel, UnaryOperator, Value,
 };
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use std::collections::HashMap;
 
 pub struct AssemblyCreator {
@@ -33,7 +38,10 @@ pub struct AssemblyCreator {
 }
 
 impl AssemblyCreator {
-    pub fn new(symbol_table: SymbolTableRef<SymbolTableEntry>, label_name_generator: NameGeneratorRef) -> AssemblyCreator {
+    pub fn new(
+        symbol_table: SymbolTableRef<SymbolTableEntry>,
+        label_name_generator: NameGeneratorRef,
+    ) -> AssemblyCreator {
         AssemblyCreator {
             int_arg_registers: [DI, SI, DX, CX, R8, R9],
             double_arg_registers: [XMM0, XMM1, XMM2, XMM3, XMM4, XMM5, XMM6, XMM7],
@@ -575,7 +583,7 @@ impl AssemblyCreator {
             dst: dst_op.clone(),
         });
 
-        let negative_zero = self.create_double_constant_operand_with_key("negative_zero", -0.0);
+        let negative_zero = self.create_double_constant_operand_with_key("negative_zero", -0.0, 16);
 
         instructions.push(Binary {
             assembly_type: Double,
@@ -721,16 +729,18 @@ impl AssemblyCreator {
         use crate::assembly::ast::Instruction::*;
 
         let src1_op = self.create_operand(src1);
+        let src1_asm_type = self.get_asm_type(src1);
         let src2_op = self.create_operand(src2);
         let dst_op = self.create_operand(dst);
 
         instructions.push(Cmp {
-            assembly_type: self.get_asm_type(src1),
+            assembly_type: src1_asm_type.clone(),
             op1: src2_op,
             op2: src1_op,
         });
         let is_unsigned = self.is_value_unsigned(src1);
-        let condition_code = self.map_relational_operator(op, is_unsigned);
+        let is_double = src1_asm_type == Double;
+        let condition_code = self.map_relational_operator(op, is_unsigned || is_double);
         instructions.push(Mov {
             assembly_type: self.get_asm_type(dst),
             src: Immediate(ImmValue::Int(0)),
@@ -917,8 +927,14 @@ impl AssemblyCreator {
                 dst,
             });
         } else {
-            let label1 = self.label_name_generator.borrow_mut().make_unique_name("uint_to_double");
-            let label2 = self.label_name_generator.borrow_mut().make_unique_name("uint_to_double");
+            let label1 = self
+                .label_name_generator
+                .borrow_mut()
+                .make_unique_name("uint_to_double");
+            let label2 = self
+                .label_name_generator
+                .borrow_mut()
+                .make_unique_name("uint_to_double");
 
             instructions.extend(vec![
                 Cmp {
@@ -979,16 +995,87 @@ impl AssemblyCreator {
 
     fn push_double_to_uint(
         &mut self,
-        _instructions: &mut Vec<Instruction>,
+        instructions: &mut Vec<Instruction>,
         src: &Value,
         dst: &Value,
     ) {
-        let _is_long = self.get_asm_type(src) == Quadword;
-        let _src = self.create_operand(src);
-        let _dst = self.create_operand(dst);
+        let is_long = self.get_asm_type(dst) == Quadword;
+        let src = self.create_operand(src);
+        let dst = self.create_operand(dst);
+        let reg = Operand::Register(Register::R10);
 
+        if !is_long {
+            instructions.extend(vec![
+                ConvertDoubleToInt {
+                    src: src.clone(),
+                    dst: reg.clone(),
+                    dst_type: Quadword,
+                },
+                Mov {
+                    assembly_type: Longword,
+                    src: reg,
+                    dst,
+                },
+            ]);
+        } else {
+            let label1 = self
+                .label_name_generator
+                .borrow_mut()
+                .make_unique_name("double_to_uint");
+            let label2 = self
+                .label_name_generator
+                .borrow_mut()
+                .make_unique_name("double_to_uint");
+            const MAX_VALUE: u64 = i64::MAX as u64 + 1;
+            let upper_bound =
+                self.create_double_constant_operand_with_key("upper_bound", MAX_VALUE as f64, 8);
 
+            let x_reg = Operand::Register(Register::XMM14);
 
+            instructions.extend(vec![
+                Cmp {
+                    assembly_type: Double,
+                    op1: upper_bound.clone(),
+                    op2: src.clone(),
+                },
+                JmpCC(ConditionCode::AE, label1.clone()),
+                ConvertDoubleToInt {
+                    src: src.clone(),
+                    dst: dst.clone(),
+                    dst_type: Quadword,
+                },
+                Jmp(label2.clone()),
+                Label(label1.clone()),
+                Mov {
+                    assembly_type: Double,
+                    src: src.clone(),
+                    dst: x_reg.clone(),
+                },
+                Binary {
+                    op: BinaryOp::Sub,
+                    assembly_type: Double,
+                    left: upper_bound.clone(),
+                    right: x_reg.clone(),
+                },
+                ConvertDoubleToInt {
+                    src: x_reg.clone(),
+                    dst: dst.clone(),
+                    dst_type: Quadword,
+                },
+                Mov {
+                    assembly_type: Quadword,
+                    src: Immediate(ImmValue::ULong(MAX_VALUE)),
+                    dst: reg.clone(),
+                },
+                Binary {
+                    op: BinaryOp::Add,
+                    assembly_type: Quadword,
+                    left: reg.clone(),
+                    right: dst.clone(),
+                },
+                Label(label2.clone()),
+            ]);
+        }
     }
 
     fn push_copy(&mut self, instructions: &mut Vec<Instruction>, src: &Value, dst: &Value) {
@@ -1020,10 +1107,15 @@ impl AssemblyCreator {
 
     fn create_double_constant_operand(&mut self, value: f64) -> Operand {
         let key = format!("{value}");
-        self.create_double_constant_operand_with_key(&key, value)
+        self.create_double_constant_operand_with_key(&key, value, 8)
     }
 
-    fn create_double_constant_operand_with_key(&mut self, key: &str, value: f64) -> Operand {
+    fn create_double_constant_operand_with_key(
+        &mut self,
+        key: &str,
+        value: f64,
+        alignment: i32,
+    ) -> Operand {
         let key = (Type::Double, key.to_string());
 
         let name = if let Some(static_const) = self.static_consts.get(&key) {
@@ -1036,7 +1128,7 @@ impl AssemblyCreator {
             let static_const = StaticConst {
                 name: name.clone(),
                 value: InitValue::Double(value),
-                alignment: 8,
+                alignment,
             };
             self.static_consts.insert(key, static_const);
             name
@@ -1053,11 +1145,7 @@ impl AssemblyCreator {
         }
     }
 
-    fn map_binary_operator(
-        &self,
-        binary_op: &TackyBinOp,
-        is_unsigned: bool,
-    ) -> BinaryOp {
+    fn map_binary_operator(&self, binary_op: &TackyBinOp, is_unsigned: bool) -> BinaryOp {
         use crate::tacky::ast::BinaryOperator::*;
         match binary_op {
             Add => BinaryOp::Add,
@@ -1083,10 +1171,10 @@ impl AssemblyCreator {
     fn map_relational_operator(
         &self,
         relational_op: &TackyBinOp,
-        is_unsigned: bool,
+        is_unsigned_or_double: bool,
     ) -> ConditionCode {
         use crate::tacky::ast::BinaryOperator::*;
-        if is_unsigned {
+        if is_unsigned_or_double {
             match relational_op {
                 Equal => ConditionCode::Eq,
                 NotEqual => ConditionCode::NotEq,
@@ -1182,17 +1270,17 @@ mod tests {
     use crate::assembly::ast::{
         BinaryOp as AsmBinaryOp, Instruction as AsmInstruction, Operand as AsmOperand,
     };
-    use crate::common::symbol_table::IdentAttrs;
     use crate::common::Type::Int;
+    use crate::common::symbol_table::IdentAttrs;
     use crate::lexer::Lexer;
     use crate::parser::Parser;
     use crate::semantic;
     use crate::semantic::NameGeneratorRef;
+    use crate::tacky::TackyEmitter;
     use crate::tacky::ast::{
         BinaryOperator, Function as TackyFunctionDef, Instruction as TackyInstruction,
         Program as TackyProgram, Value,
     };
-    use crate::tacky::TackyEmitter;
     use anyhow::Result;
 
     fn make_emitter(
