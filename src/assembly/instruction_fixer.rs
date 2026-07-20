@@ -1,11 +1,13 @@
 use crate::assembly::assembly_creator::AssemblyCreator;
 use crate::assembly::ast::AssemblyType::{Longword, Quadword};
-use crate::assembly::ast::Instruction::{Mov, MovSx};
+use crate::assembly::ast::Instruction::{ConvertDoubleToInt, ConvertIntToDouble, Mov, MovSx};
 use crate::assembly::ast::Operand::{Immediate, Register};
-use crate::assembly::ast::Register::{R10, R11};
+use crate::assembly::ast::Register::{R10, R11, XMM15};
 use crate::assembly::ast::{AssemblyType, BinaryOp, ImmValue, Instruction, Operand, VisitorMut};
 
 pub struct InstructionFixer;
+
+impl InstructionFixer {}
 
 impl InstructionFixer {
     pub fn new() -> InstructionFixer {
@@ -361,6 +363,99 @@ impl InstructionFixer {
         }
     }
 
+    fn handle_conv_double_to_int(
+        &self,
+        instruction: &Instruction,
+        dst_type: &AssemblyType,
+        src: &Operand,
+        dst: &Operand,
+        instructions: &mut Vec<Instruction>,
+    ) {
+        match dst {
+            Register(_) => {
+                instructions.push(instruction.clone());
+            }
+            _ => {
+                let reg = Register(R11);
+                instructions.extend(vec![
+                    ConvertDoubleToInt {
+                        dst_type: dst_type.clone(),
+                        src: src.clone(),
+                        dst: reg.clone(),
+                    },
+                    Mov {
+                        assembly_type: dst_type.clone(),
+                        src: reg.clone(),
+                        dst: dst.clone(),
+                    },
+                ]);
+            }
+        }
+    }
+    fn handle_conv_int_to_double(
+        &self,
+        instruction: &Instruction,
+        src_type: &AssemblyType,
+        src: &Operand,
+        dst: &Operand,
+        instructions: &mut Vec<Instruction>,
+    ) {
+        let src_is_const = matches!(src, Immediate(_));
+        let dst_is_reg = matches!(dst, Register(_));
+
+        if src_is_const {
+            if dst_is_reg {
+                instructions.extend(vec![
+                    Mov {
+                        assembly_type: src_type.clone(),
+                        src: src.clone(),
+                        dst: Register(R10),
+                    },
+                    ConvertIntToDouble {
+                        src_type: src_type.clone(),
+                        src: Register(R10),
+                        dst: dst.clone(),
+                    },
+                ]);
+            } else {
+                instructions.extend(vec![
+                    Mov {
+                        assembly_type: src_type.clone(),
+                        src: src.clone(),
+                        dst: Register(R10),
+                    },
+                    ConvertIntToDouble {
+                        src_type: src_type.clone(),
+                        src: Register(R10),
+                        dst: Register(XMM15),
+                    },
+                    Mov {
+                        assembly_type: AssemblyType::Double,
+                        src: Register(XMM15),
+                        dst: dst.clone(),
+                    },
+                ]);
+            }
+        } else {
+            if dst_is_reg {
+                instructions.push(instruction.clone());
+            } else {
+                instructions.extend(vec![
+                    ConvertIntToDouble {
+                        src_type: src_type.clone(),
+                        src: src.clone(),
+                        dst: Register(XMM15),
+                    },
+                    Mov {
+                        assembly_type: AssemblyType::Double,
+                        src: Register(XMM15),
+                        dst: dst.clone(),
+                    },
+                ]);
+            }
+        }
+    }
+
     fn handle_push(
         &self,
         instruction: &Instruction,
@@ -453,6 +548,20 @@ impl VisitorMut for InstructionFixer {
                     op2,
                 } => self.handle_cmp(instruction, assembly_type, op1, op2, &mut new_instructions),
                 Push(operand) => self.handle_push(instruction, operand, &mut new_instructions),
+                ConvertDoubleToInt { dst_type, src, dst } => self.handle_conv_double_to_int(
+                    instruction,
+                    dst_type,
+                    src,
+                    dst,
+                    &mut new_instructions,
+                ),
+                ConvertIntToDouble { src_type, src, dst } => self.handle_conv_int_to_double(
+                    instruction,
+                    src_type,
+                    src,
+                    dst,
+                    &mut new_instructions,
+                ),
                 _ => new_instructions.push(instruction.clone()),
             }
         }
