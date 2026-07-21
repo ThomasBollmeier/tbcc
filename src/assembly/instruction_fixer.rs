@@ -321,6 +321,26 @@ impl InstructionFixer {
             Register::{R10, R11},
         };
 
+        if *assembly_type == AssemblyType::Double {
+            if !matches!(op2, Register(_)) {
+                new_instructions.extend(vec![
+                    Mov {
+                        assembly_type: assembly_type.clone(),
+                        src: op2.clone(),
+                        dst: Register(XMM15),
+                    },
+                    Cmp {
+                        assembly_type: assembly_type.clone(),
+                        op1: op1.clone(),
+                        op2: Register(XMM15),
+                    },
+                ]);
+            } else {
+                new_instructions.push(instruction.clone());
+            }
+            return;
+        }
+
         let (op1, replaced) = &Self::replace_long_src_operand(assembly_type, op1, new_instructions);
 
         match (op1, op2) {
