@@ -1,8 +1,8 @@
 use crate::assembly::assembly_creator::AssemblyCreator;
-use crate::assembly::ast::AssemblyType::{Longword, Quadword};
-use crate::assembly::ast::Instruction::{ConvertDoubleToInt, ConvertIntToDouble, Mov, MovSx};
+use crate::assembly::ast::AssemblyType::{Double, Longword, Quadword};
+use crate::assembly::ast::Instruction::{Binary, ConvertDoubleToInt, ConvertIntToDouble, Mov, MovSx};
 use crate::assembly::ast::Operand::{Immediate, Register};
-use crate::assembly::ast::Register::{R10, R11, XMM15};
+use crate::assembly::ast::Register::{R10, R11, XMM14, XMM15};
 use crate::assembly::ast::{AssemblyType, BinaryOp, ImmValue, Instruction, Operand, VisitorMut};
 
 pub struct InstructionFixer;
@@ -41,6 +41,12 @@ impl InstructionFixer {
             _ => false,
         };
 
+        let reg = if *assembly_type == Double {
+            Register(XMM14)
+        } else {
+            Register(R10)
+        };
+
         if Self::all_memory(&[src, dst]) || src_is_long {
             let src = if *assembly_type == Longword && src_is_long {
                 match src {
@@ -54,11 +60,11 @@ impl InstructionFixer {
             new_instructions.push(Mov {
                 assembly_type: assembly_type.clone(),
                 src: src.clone(),
-                dst: Register(R10),
+                dst: reg.clone(),
             });
             new_instructions.push(Mov {
                 assembly_type: assembly_type.clone(),
-                src: Register(R10),
+                src: reg.clone(),
                 dst: dst.clone(),
             });
         } else {
@@ -149,7 +155,7 @@ impl InstructionFixer {
     ) {
         use crate::assembly::ast::{
             BinaryOp::{
-                Add, BitAnd, BitOr, BitXor, Mul, ShiftLeft, ShiftRightArithmetic,
+                Add, BitAnd, BitOr, BitXor, DivDouble, Mul, ShiftLeft, ShiftRightArithmetic,
                 ShiftRightLogical, Sub,
             },
             Instruction::{Binary, Mov},
@@ -161,6 +167,11 @@ impl InstructionFixer {
             ShiftLeft | ShiftRightArithmetic | ShiftRightLogical => (left.clone(), false),
             _ => Self::replace_long_src_operand(assembly_type, left, new_instructions),
         };
+
+        if *assembly_type == Double && matches!(op, Add | Sub | Mul | DivDouble | BitXor) {
+            self.handle_binary_double(instruction, op, &left, right, new_instructions);
+            return;
+        }
 
         match op {
             Mul => {
@@ -246,7 +257,37 @@ impl InstructionFixer {
                     }
                 }
             }
-            BinaryOp::DivDouble => todo!("DivDouble is not implemented in InstructionFixer yet"),
+            DivDouble => unreachable!(),
+        }
+    }
+
+    fn handle_binary_double(
+        &self,
+        instruction: &Instruction,
+        op: &BinaryOp,
+        left: &Operand,
+        right: &Operand,
+        new_instructions: &mut Vec<Instruction>,
+    ) {
+        match right {
+            Register(_) => {
+                new_instructions.push(instruction.clone());
+            }
+            _ => {
+                new_instructions.extend(vec![
+                    Mov {
+                        assembly_type: Double,
+                        src: right.clone(),
+                        dst: Register(XMM15),
+                    },
+                    Binary {
+                        assembly_type: Double,
+                        op: op.clone(),
+                        left: left.clone(),
+                        right: Register(XMM15),
+                    }
+                ]);
+            }
         }
     }
 
@@ -321,7 +362,7 @@ impl InstructionFixer {
             Register::{R10, R11},
         };
 
-        if *assembly_type == AssemblyType::Double {
+        if *assembly_type == Double {
             if !matches!(op2, Register(_)) {
                 new_instructions.extend(vec![
                     Mov {
