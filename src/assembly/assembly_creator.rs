@@ -15,7 +15,7 @@ use crate::assembly::ast::{
     ConditionCode, FuncDef, Instruction, Operand, Program, Register, UnaryOp,
 };
 use crate::assembly::symbol_table::SymbolTableEntry as AsmSymbolTableEntry;
-use crate::ast::Type::{UInt, ULong};
+use crate::ast::Type::{Int, Long, UInt, ULong};
 use crate::common::name_generator::make_static_const_label_generator;
 use crate::common::symbol_table::SymbolTableEntry;
 use crate::common::symbol_table_generic::{SymbolTable, SymbolTableRef};
@@ -143,12 +143,67 @@ impl AssemblyCreator {
 
     fn determine_static_var_value(&self, static_var: &StaticVariable) -> Result<InitValue> {
         match static_var.initial_value {
-            Value::IntegerConstant(i) => Ok(InitValue::Int(i)),
-            Value::UnsignedIntegerConstant(u) => Ok(InitValue::UInt(u)),
-            Value::LongConstant(l) => Ok(InitValue::Long(l)),
-            Value::UnsignedLongConstant(ul) => Ok(InitValue::ULong(ul)),
-            Value::DoubleConstant(d) => Ok(InitValue::Double(d)),
+            Value::IntegerConstant(i) => Self::cast_int_to_ctype(i, &static_var.c_type),
+            Value::UnsignedIntegerConstant(u) => Self::cast_uint_to_ctype(u, &static_var.c_type),
+            Value::LongConstant(l) => Self::cast_long_to_ctype(l, &static_var.c_type),
+            Value::UnsignedLongConstant(ul) => Self::cast_ulong_to_ctype(ul, &static_var.c_type),
+            Value::DoubleConstant(d) => Self::cast_double_to_ctype(d, &static_var.c_type),
             _ => Err(anyhow!("invalid initial value of static variable")),
+        }
+    }
+
+    fn cast_int_to_ctype(value: i32, c_type: &Type) -> Result<InitValue> {
+        match c_type {
+            Int => Ok(InitValue::Int(value)),
+            UInt => Ok(InitValue::UInt(value as u32)),
+            Long => Ok(InitValue::Long(value as i64)),
+            ULong => Ok(InitValue::ULong(value as u64)),
+            Type::Double => Ok(InitValue::Double(value as f64)),
+            _ => Err(anyhow!("invalid target type of cast: {:#?}", c_type)),
+        }
+    }
+
+    fn cast_uint_to_ctype(value: u32, c_type: &Type) -> Result<InitValue> {
+        match c_type {
+            Int => Ok(InitValue::Int(value as i32)),
+            UInt => Ok(InitValue::UInt(value)),
+            Long => Ok(InitValue::Long(value as i64)),
+            ULong => Ok(InitValue::ULong(value as u64)),
+            Type::Double => Ok(InitValue::Double(value as f64)),
+            _ => Err(anyhow!("invalid target type of cast: {:#?}", c_type)),
+        }
+    }
+
+    fn cast_long_to_ctype(value: i64, c_type: &Type) -> Result<InitValue> {
+        match c_type {
+            Int => Ok(InitValue::Int(value as i32)),
+            UInt => Ok(InitValue::UInt(value as u32)),
+            Long => Ok(InitValue::Long(value)),
+            ULong => Ok(InitValue::ULong(value as u64)),
+            Type::Double => Ok(InitValue::Double(value as f64)),
+            _ => Err(anyhow!("invalid target type of cast: {:#?}", c_type)),
+        }
+    }
+
+    fn cast_ulong_to_ctype(value: u64, c_type: &Type) -> Result<InitValue> {
+        match c_type {
+            Int => Ok(InitValue::Int(value as i32)),
+            UInt => Ok(InitValue::UInt(value as u32)),
+            Long => Ok(InitValue::Long(value as i64)),
+            ULong => Ok(InitValue::ULong(value)),
+            Type::Double => Ok(InitValue::Double(value as f64)),
+            _ => Err(anyhow!("invalid target type of cast: {:#?}", c_type)),
+        }
+    }
+
+    fn cast_double_to_ctype(value: f64, c_type: &Type) -> Result<InitValue> {
+        match c_type {
+            Int => Ok(InitValue::Int(value as i32)),
+            UInt => Ok(InitValue::UInt(value as u32)),
+            Long => Ok(InitValue::Long(value as i64)),
+            ULong => Ok(InitValue::ULong(value as u64)),
+            Type::Double => Ok(InitValue::Double(value)),
+            _ => Err(anyhow!("invalid target type of cast: {:#?}", c_type)),
         }
     }
 
@@ -391,7 +446,7 @@ impl AssemblyCreator {
 
         for (param_type, item) in param_types.iter().zip(items) {
             match param_type {
-                Type::Int | UInt | Type::Long | ULong => {
+                Int | UInt | Long | ULong => {
                     if int_reg_items.len() < num_int_regs {
                         int_reg_items.push(item.clone());
                     } else {
@@ -479,13 +534,12 @@ impl AssemblyCreator {
     fn push_unary_not(&mut self, instructions: &mut Vec<Instruction>, src: &Value, dst: &Value) {
         use crate::assembly::ast::Instruction::*;
 
-        let assembly_type = self.get_asm_type(dst);
-
-        if assembly_type == Double {
+        if self.get_asm_type(src) == Double {
             self.push_unary_double_not(instructions, src, dst);
             return;
         }
 
+        let assembly_type = self.get_asm_type(dst);
         let src_op = self.create_operand(src);
         let dst_op = self.create_operand(dst);
         instructions.push(Cmp {
@@ -1512,6 +1566,46 @@ mod tests {
         let code = r#"
         double increment(double x) {
             return x + 1.0;
+        }
+        "#;
+
+        run_code(code);
+    }
+
+    #[test]
+    fn creates_asm_program_with_double_addition_2() {
+        let code = r#"
+        int main(void) {
+            double x = 40.0;
+            double y = 2.0;
+            return x + y;
+        }
+        "#;
+
+        run_code(code);
+    }
+
+    #[test]
+    fn creates_asm_program_with_global_double_vars() {
+        let code = r#"
+        double a = 4294967295u;
+
+        int main(void) {
+          if (a != 4294967295.) {
+            return 99;
+          }
+          return 0;
+        }
+        "#;
+
+        run_code(code);
+    }
+
+    #[test]
+    fn creates_asm_program_w_double_not() {
+        let code = r#"
+         int non_zero(double x) {
+            return !x;
         }
         "#;
 

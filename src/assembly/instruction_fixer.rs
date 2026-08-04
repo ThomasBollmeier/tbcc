@@ -285,6 +285,11 @@ impl InstructionFixer {
                         op: op.clone(),
                         left: left.clone(),
                         right: Register(XMM15),
+                    },
+                    Mov {
+                        assembly_type: Double,
+                        src: Register(XMM15),
+                        dst: right.clone(),
                     }
                 ]);
             }

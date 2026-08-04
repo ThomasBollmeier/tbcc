@@ -34,6 +34,39 @@ pub enum InitValue {
     Double(f64),
 }
 
+impl InitValue {
+    pub fn is_quadword (&self) -> bool {
+        match self {
+            InitValue::Int(_) => false,
+            InitValue::UInt(_) => false,
+            InitValue::Long(_) => true,
+            InitValue::ULong(_) => true,
+            InitValue::Double(_) => true,
+        }
+    }
+
+    pub fn is_zero (&self) -> bool {
+        match self {
+            InitValue::Int(i) => *i == 0,
+            InitValue::UInt(u) => *u == 0,
+            InitValue::Long(l) => *l == 0,
+            InitValue::ULong(ul) => *ul == 0,
+            InitValue::Double(_) => false,
+        }
+    }
+
+    pub fn is_nonzero (&self) -> bool {
+        !self.is_zero()
+    }
+
+    pub fn is_double (&self) -> bool {
+        match self {
+            InitValue::Double(_) => true,
+            _ => false,
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use crate::common::symbol_table_generic::SymbolTable;

@@ -1,6 +1,6 @@
 use crate::assembly::ast::{
-    AssemblyType, BinaryOp, ConditionCode, FuncDef, Instruction, Operand, Program,
-    Register, StaticVar, UnaryOp, Visitor,
+    AssemblyType, BinaryOp, ConditionCode, FuncDef, Instruction, Operand, Program, Register,
+    StaticConst, StaticVar, UnaryOp, Visitor,
 };
 use crate::assembly::symbol_table::SymbolTableEntry;
 use crate::common::InitValue;
@@ -48,6 +48,16 @@ impl CodeGenerator {
             Operand::Register(Register::R9) => "%r9".to_string(),
             Operand::Register(Register::R10) => "%r10".to_string(),
             Operand::Register(Register::R11) => "%r11".to_string(),
+            Operand::Register(Register::XMM0) => "%xmm0".to_string(),
+            Operand::Register(Register::XMM1) => "%xmm1".to_string(),
+            Operand::Register(Register::XMM2) => "%xmm2".to_string(),
+            Operand::Register(Register::XMM3) => "%xmm3".to_string(),
+            Operand::Register(Register::XMM4) => "%xmm4".to_string(),
+            Operand::Register(Register::XMM5) => "%xmm5".to_string(),
+            Operand::Register(Register::XMM6) => "%xmm6".to_string(),
+            Operand::Register(Register::XMM7) => "%xmm7".to_string(),
+            Operand::Register(Register::XMM14) => "%xmm14".to_string(),
+            Operand::Register(Register::XMM15) => "%xmm15".to_string(),
             Operand::Register(Register::SP) => "%rsp".to_string(),
             Operand::Stack(offset) => format!("{}(%rbp)", offset),
             Operand::Data(label) => self.get_variable_op_name(label),
@@ -67,6 +77,16 @@ impl CodeGenerator {
             Operand::Register(Register::R9) => "%r9d".to_string(),
             Operand::Register(Register::R10) => "%r10d".to_string(),
             Operand::Register(Register::R11) => "%r11d".to_string(),
+            Operand::Register(Register::XMM0) => "%xmm0".to_string(),
+            Operand::Register(Register::XMM1) => "%xmm1".to_string(),
+            Operand::Register(Register::XMM2) => "%xmm2".to_string(),
+            Operand::Register(Register::XMM3) => "%xmm3".to_string(),
+            Operand::Register(Register::XMM4) => "%xmm4".to_string(),
+            Operand::Register(Register::XMM5) => "%xmm5".to_string(),
+            Operand::Register(Register::XMM6) => "%xmm6".to_string(),
+            Operand::Register(Register::XMM7) => "%xmm7".to_string(),
+            Operand::Register(Register::XMM14) => "%xmm14".to_string(),
+            Operand::Register(Register::XMM15) => "%xmm15".to_string(),
             Operand::Register(Register::SP) => "%esp".to_string(),
             Operand::Stack(offset) => format!("{}(%rbp)", offset),
             Operand::Data(label) => self.get_variable_op_name(label),
@@ -86,6 +106,16 @@ impl CodeGenerator {
             Operand::Register(Register::R9) => "%r9b".to_string(),
             Operand::Register(Register::R10) => "%r10b".to_string(),
             Operand::Register(Register::R11) => "%r11b".to_string(),
+            Operand::Register(Register::XMM0) => "%xmm0".to_string(),
+            Operand::Register(Register::XMM1) => "%xmm1".to_string(),
+            Operand::Register(Register::XMM2) => "%xmm2".to_string(),
+            Operand::Register(Register::XMM3) => "%xmm3".to_string(),
+            Operand::Register(Register::XMM4) => "%xmm4".to_string(),
+            Operand::Register(Register::XMM5) => "%xmm5".to_string(),
+            Operand::Register(Register::XMM6) => "%xmm6".to_string(),
+            Operand::Register(Register::XMM7) => "%xmm7".to_string(),
+            Operand::Register(Register::XMM14) => "%xmm14".to_string(),
+            Operand::Register(Register::XMM15) => "%xmm15".to_string(),
             Operand::Register(Register::SP) => "%spl".to_string(),
             Operand::Stack(offset) => format!("{}(%rbp)", offset),
             Operand::Data(label) => self.get_variable_op_name(label),
@@ -97,7 +127,7 @@ impl CodeGenerator {
         match assembly_type {
             AssemblyType::Longword => self.operand_4byte_to_string(&operand),
             AssemblyType::Quadword => self.operand_8byte_to_string(&operand),
-            AssemblyType::Double => todo!("handle double type"),
+            AssemblyType::Double => self.operand_8byte_to_string(&operand),
         }
     }
 
@@ -122,7 +152,7 @@ impl CodeGenerator {
             BinaryOp::ShiftLeft => "shl".to_string(),
             BinaryOp::ShiftRightLogical => "shr".to_string(),
             BinaryOp::ShiftRightArithmetic => "sar".to_string(),
-            BinaryOp::DivDouble => todo!("handle to string conversion for double division"),
+            BinaryOp::DivDouble => "div".to_string(),
         };
         let suffix = self.get_instruction_suffix(assembly_type);
         format!("{}{}", instruction, suffix)
@@ -204,8 +234,179 @@ impl CodeGenerator {
         match assembly_type {
             AssemblyType::Longword => String::from("l"),
             AssemblyType::Quadword => String::from("q"),
-            AssemblyType::Double => todo!("handle double type suffix"),
+            AssemblyType::Double => String::from("sd"),
         }
+    }
+
+    fn init_value_to_string(value: &InitValue) -> String {
+        match value {
+            InitValue::Int(i) => i.to_string(),
+            InitValue::UInt(u) => u.to_string(),
+            InitValue::Long(l) => l.to_string(),
+            InitValue::ULong(ul) => ul.to_string(),
+            InitValue::Double(d) => format!("{}", d.to_bits()),
+        }
+    }
+
+    fn write_init_value_instruction(&mut self, value: &InitValue) {
+        if value.is_nonzero() || value.is_double() {
+            let value_str = Self::init_value_to_string(&value);
+            let instruction = if value.is_double() {
+                ".quad"
+            } else if value.is_quadword() {
+                ".quad"
+            } else {
+                ".long"
+            };
+            self.write_instruction(&format!("{} {}", instruction, value_str));
+        } else {
+            let size = if !value.is_quadword() { 4 } else { 8 };
+            self.write_instruction(&format!(".zero {size}"));
+        }
+    }
+
+    fn write_alignment_instruction(&mut self, alignment: i32) {
+        if cfg!(target_os = "linux") {
+            self.write_instruction(&format!(".align {alignment}"));
+        } else if cfg!(target_os = "macos") {
+            self.write_instruction(&format!(".balign {alignment}"));
+        } else {
+            unreachable!()
+        }
+    }
+
+    fn emit_mov(&mut self, assembly_type: &AssemblyType, src: &Operand, dst: &Operand) {
+        let suffix = self.get_instruction_suffix(assembly_type);
+        let src = self.operand_to_string(src, assembly_type);
+        let dst = self.operand_to_string(dst, assembly_type);
+        self.write_instruction(&format!("mov{suffix} \t{src}, {dst}"));
+    }
+
+    fn emit_mov_sx(&mut self, src: &Operand, dst: &Operand) {
+        let src_str = self.operand_4byte_to_string(src);
+        let dst_str = self.operand_8byte_to_string(dst);
+        self.write_instruction(&format!("movslq \t{src_str}, {dst_str}"));
+    }
+
+    fn emit_convert_int_to_double(
+        &mut self,
+        src_type: &AssemblyType,
+        src: &Operand,
+        dst: &Operand,
+    ) {
+        let suffix = self.get_instruction_suffix(src_type);
+        let src = self.operand_to_string(src, src_type);
+        let dst = self.operand_to_string(dst, &AssemblyType::Double);
+        self.write_instruction(&format!("cvtsi2sd{suffix} \t{src}, {dst}"));
+    }
+
+    fn emit_convert_double_to_int(
+        &mut self,
+        dst_type: &AssemblyType,
+        src: &Operand,
+        dst: &Operand,
+    ) {
+        let suffix = self.get_instruction_suffix(dst_type);
+        let src = self.operand_to_string(src, &AssemblyType::Double);
+        let dst = self.operand_to_string(dst, dst_type);
+        self.write_instruction(&format!("cvttsd2si{suffix} \t{src}, {dst}"));
+    }
+
+    fn emit_ret(&mut self) {
+        self.write_instruction("movq \t%rbp, %rsp");
+        self.write_instruction("popq \t%rbp");
+        self.write_instruction("ret");
+    }
+
+    fn emit_unary(&mut self, assembly_type: &AssemblyType, op: &UnaryOp, operand: &Operand) {
+        let op_str = self.unary_op_to_string(op, assembly_type);
+        let operand_str = self.operand_to_string(operand, assembly_type);
+        self.write_instruction(&format!("{op_str} \t{operand_str}"));
+    }
+
+    fn emit_binary(
+        &mut self,
+        op: &BinaryOp,
+        left: &Operand,
+        right: &Operand,
+        assembly_type: &AssemblyType,
+    ) {
+        let op_str = if *assembly_type == AssemblyType::Double {
+            match op {
+                BinaryOp::BitXor => "xorpd".to_string(),
+                BinaryOp::Mul => "mulsd".to_string(),
+                _ => self.binary_op_to_string(op, assembly_type),
+            }
+        } else {
+            self.binary_op_to_string(op, assembly_type)
+        };
+        let left_str = self.operand_to_string(left, assembly_type);
+        let right_str = self.operand_to_string(right, assembly_type);
+        self.write_instruction(&format!("{op_str} \t{left_str}, {right_str}"));
+    }
+
+    fn emit_idiv(&mut self, assembly_type: &AssemblyType, operand: &Operand) {
+        let suffix = self.get_instruction_suffix(assembly_type);
+        let operand_str = self.operand_to_string(operand, assembly_type);
+        self.write_instruction(&format!("idiv{suffix} \t{operand_str}"));
+    }
+
+    fn emit_div(&mut self, assembly_type: &AssemblyType, operand: &Operand) {
+        let suffix = self.get_instruction_suffix(assembly_type);
+        let operand_str = self.operand_to_string(operand, assembly_type);
+        self.write_instruction(&format!("div{suffix} \t{operand_str}"));
+    }
+
+    fn emit_cdq(&mut self, assembly_type: &AssemblyType) {
+        match assembly_type {
+            AssemblyType::Longword => self.write_instruction("cdq"),
+            AssemblyType::Quadword => self.write_instruction("cqo"),
+            AssemblyType::Double => panic!("cannot handle cdq for double type"),
+        }
+    }
+
+    fn emit_cmp(&mut self, op1: &Operand, op2: &Operand, assembly_type: &AssemblyType) {
+        let instruction = if *assembly_type == AssemblyType::Double {
+            "comisd".to_string()
+        } else {
+            let suffix = self.get_instruction_suffix(assembly_type);
+            format!("cmp{}", suffix)
+        };
+        let op1_str = self.operand_to_string(op1, assembly_type);
+        let op2_str = self.operand_to_string(op2, assembly_type);
+        self.write_instruction(&format!("{instruction} \t{op1_str}, {op2_str}"));
+    }
+
+    fn emit_jmp(&mut self, label: &str) {
+        let label = self.local_label(label);
+        self.write_instruction(&format!("jmp \t{label}"));
+    }
+
+    fn emit_jmp_cc(&mut self, condition_code: &ConditionCode, label: &str) {
+        let suffix = self.condition_code_to_suffix(condition_code);
+        let label = self.local_label(label);
+        self.write_instruction(&format!("j{suffix} \t{label}"));
+    }
+
+    fn emit_set_cc(&mut self, condition_code: &ConditionCode, operand: &Operand) {
+        let suffix = self.condition_code_to_suffix(condition_code);
+        let operand_str = self.operand_1byte_to_string(operand);
+        self.write_instruction(&format!("set{suffix} \t{operand_str}"));
+    }
+
+    fn emit_label(&mut self, label: &str) {
+        let label = self.local_label(label);
+        self.write_label(&label);
+    }
+
+    fn emit_push(&mut self, operand: &Operand) {
+        let operand_str = self.operand_8byte_to_string(operand);
+        self.write_instruction(&format!("pushq \t{operand_str}"));
+    }
+
+    fn emit_call(&mut self, func_name: &str) {
+        let name = self.get_function_name(func_name);
+        self.write_instruction(&format!("call \t{name}"));
     }
 }
 
@@ -240,144 +441,63 @@ impl Visitor for CodeGenerator {
             self.write_instruction(&format!(".globl {}", static_var.name));
         }
 
-        let (value, is_quadword) = match static_var.value {
-            InitValue::Int(i) => (i as i64, false),
-            InitValue::UInt(u) => (u as i64, false),
-            InitValue::Long(l) => (l, true),
-            InitValue::ULong(ul) => (ul as i64, true),
-            InitValue::Double(_) => todo!("Support for double static variables is not implemented yet"),
-        };
+        let value = static_var.value.clone();
 
-        if value != 0 {
+        if value.is_nonzero() || value.is_double() {
             self.write_instruction(".data");
         } else {
             self.write_instruction(".bss");
         }
+        self.write_alignment_instruction(static_var.alignment);
+        self.write_label(&self.get_variable_name(&static_var.name));
+        self.write_init_value_instruction(&value);
+    }
 
+    fn visit_static_const(&mut self, static_const: &StaticConst) {
         if cfg!(target_os = "linux") {
-            self.write_instruction(&format!(".align {}", static_var.alignment));
+            self.write_instruction(".section .rodata");
         } else if cfg!(target_os = "macos") {
-            self.write_instruction(&format!(".balign {}", static_var.alignment));
+            self.write_instruction(&format!(".literal{}", static_const.alignment));
         } else {
             unreachable!()
         }
+        self.write_alignment_instruction(static_const.alignment);
+        self.write_label(&self.get_variable_name(&static_const.name));
+        self.write_init_value_instruction(&static_const.value);
 
-        self.write_label(&self.get_variable_name(&static_var.name));
-
-        if value != 0 {
-            if !is_quadword {
-                self.write_instruction(&format!(".long {}", value));
-            } else {
-                self.write_instruction(&format!(".quad {}", value));
-            }
-        } else {
-            let size = if !is_quadword { 4 } else { 8 };
-            self.write_instruction(&format!(".zero {size}"));
+        if cfg!(target_os = "macos") && static_const.alignment == 16 {
+            self.write_instruction(".quad 0");
         }
     }
 
     fn visit_instruction(&mut self, instruction: &Instruction) {
         match instruction {
-            Instruction::Mov {
-                assembly_type,
-                src,
-                dst,
-            } => {
-                let suffix = self.get_instruction_suffix(assembly_type);
-                let src = self.operand_to_string(src, assembly_type);
-                let dst = self.operand_to_string(dst, assembly_type);
-                self.write_instruction(&format!("mov{suffix} \t{src}, {dst}"));
-            }
-            Instruction::MovSx { src, dst, .. } => {
-                let src_str = self.operand_4byte_to_string(src);
-                let dst_str = self.operand_8byte_to_string(dst);
-                self.write_instruction(&format!("movslq \t{src_str}, {dst_str}"));
-            }
+            Instruction::Mov { assembly_type, src, dst } => self.emit_mov(assembly_type, src, dst),
+            Instruction::MovSx { src, dst, .. } => self.emit_mov_sx(src, dst),
             Instruction::MovZeroExtend { src: _, dst: _ } => unreachable!("cannot be reached"),
-            Instruction::ConvertIntToDouble { .. } => todo!("handle ConvertIntToDouble instruction"),
-            Instruction::ConvertDoubleToInt { .. } => todo!("handle ConvertDoubleToInt instruction"),
-            Instruction::Ret => {
-                self.write_instruction("movq \t%rbp, %rsp");
-                self.write_instruction("popq \t%rbp");
-                self.write_instruction("ret");
+            Instruction::ConvertIntToDouble { src_type, src, dst } => {
+                self.emit_convert_int_to_double(src_type, src, dst)
             }
-            Instruction::Unary {
-                assembly_type,
-                op,
-                operand,
-            } => {
-                let op_str = self.unary_op_to_string(op, assembly_type);
-                let operand_str = self.operand_to_string(operand, assembly_type);
-                self.write_instruction(&format!("{op_str} \t{operand_str}"));
+            Instruction::ConvertDoubleToInt { dst_type, src, dst } => {
+                self.emit_convert_double_to_int(dst_type, src, dst)
             }
-            Instruction::Binary {
-                op,
-                left,
-                right,
-                assembly_type,
-            } => {
-                let op_str = self.binary_op_to_string(op, assembly_type);
-                let left_str = self.operand_to_string(left, assembly_type);
-                let right_str = self.operand_to_string(right, assembly_type);
-                self.write_instruction(&format!("{op_str} \t{left_str}, {right_str}"));
+            Instruction::Ret => self.emit_ret(),
+            Instruction::Unary { assembly_type, op, operand } => {
+                self.emit_unary(assembly_type, op, operand)
             }
-            Instruction::Idiv {
-                operand,
-                assembly_type,
-            } => {
-                let suffix = self.get_instruction_suffix(assembly_type);
-                let operand_str = self.operand_to_string(operand, assembly_type);
-                self.write_instruction(&format!("idiv{suffix} \t{operand_str}"));
+            Instruction::Binary { op, left, right, assembly_type } => {
+                self.emit_binary(op, left, right, assembly_type)
             }
-            Instruction::Div {
-                operand,
-                assembly_type,
-            } => {
-                let suffix = self.get_instruction_suffix(assembly_type);
-                let operand_str = self.operand_to_string(operand, assembly_type);
-                self.write_instruction(&format!("div{suffix} \t{operand_str}"));
-            }
-            Instruction::Cdq(assembly_type) => match assembly_type {
-                AssemblyType::Longword => self.write_instruction("cdq"),
-                AssemblyType::Quadword => self.write_instruction("cqo"),
-                AssemblyType::Double => todo!("handle double type cdq"),
-            },
-            Instruction::Cmp {
-                op1,
-                op2,
-                assembly_type,
-            } => {
-                let suffix = self.get_instruction_suffix(assembly_type);
-                let op1_str = self.operand_to_string(op1, assembly_type);
-                let op2_str = self.operand_to_string(op2, assembly_type);
-                self.write_instruction(&format!("cmp{suffix} \t{op1_str}, {op2_str}"));
-            }
-            Instruction::Jmp(label) => {
-                let label = self.local_label(label);
-                self.write_instruction(&format!("jmp \t{label}"));
-            }
-            Instruction::JmpCC(condition_code, label) => {
-                let suffix = self.condition_code_to_suffix(condition_code);
-                let label = self.local_label(label);
-                self.write_instruction(&format!("j{suffix} \t{label}"));
-            }
-            Instruction::SetCC(condition_code, operand) => {
-                let suffix = self.condition_code_to_suffix(condition_code);
-                let operand_str = self.operand_1byte_to_string(operand);
-                self.write_instruction(&format!("set{suffix} \t{operand_str}"));
-            }
-            Instruction::Label(label) => {
-                let label = self.local_label(label);
-                self.write_label(&label);
-            }
-            Instruction::Push(operand) => {
-                let operand_str = self.operand_8byte_to_string(operand);
-                self.write_instruction(&format!("pushq \t{operand_str}"));
-            }
-            Instruction::Call(func_name) => {
-                let name = self.get_function_name(func_name);
-                self.write_instruction(&format!("call \t{name}"));
-            }
+            Instruction::Idiv { operand, assembly_type } => self.emit_idiv(assembly_type, operand),
+            Instruction::Div { operand, assembly_type } => self.emit_div(assembly_type, operand),
+            Instruction::Cdq(assembly_type) => self.emit_cdq(assembly_type),
+            Instruction::Cmp { op1, op2, assembly_type } => self.emit_cmp(op1, op2, assembly_type),
+            Instruction::Jmp(label) => self.emit_jmp(label),
+            Instruction::JmpCC(condition_code, label) => self.emit_jmp_cc(condition_code, label),
+            Instruction::SetCC(condition_code, operand) => self.emit_set_cc(condition_code, operand),
+            Instruction::Label(label) => self.emit_label(label),
+            Instruction::Push(operand) => self.emit_push(operand),
+            Instruction::Call(func_name) => self.emit_call(func_name),
         }
     }
 }
@@ -554,10 +674,24 @@ mod tests {
         let asm_code = code_generator.generate_assembly(&assembly_program);
 
         print!("{asm_code}");
-
-
     }
 
+    #[test]
+    fn generate_asm_for_double_addition() {
+        let code = r#"
+        int main(void) {
+            double x = 40.0;
+            double y = 2.0;
+            return x + y;
+        }
+        "#;
+
+        let (assembly_program, asm_symbol_table) = create_assembly(code);
+        let code_generator = CodeGenerator::new(asm_symbol_table);
+        let asm_code = code_generator.generate_assembly(&assembly_program);
+
+        print!("{asm_code}");
+    }
     fn create_assembly(code: &str) -> (Program, SymbolTableRef<SymbolTableEntry>) {
         let parser = Parser::new();
         let lexer = Lexer::new();
@@ -578,8 +712,11 @@ mod tests {
         )
         .expect("Semantic validation failed");
 
-        let mut tacky_emitter =
-            TackyEmitter::new(label_name_gen.clone(), tmp_var_name_gen, symbol_table.clone());
+        let mut tacky_emitter = TackyEmitter::new(
+            label_name_gen.clone(),
+            tmp_var_name_gen,
+            symbol_table.clone(),
+        );
         let tacky_program = tacky_emitter
             .emit_program(&program)
             .expect("Failed to emit tacky program");

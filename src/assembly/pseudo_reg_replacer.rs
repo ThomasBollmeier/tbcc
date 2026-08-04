@@ -69,6 +69,21 @@ impl PseudoRegReplacer {
             _ => false,
         }
     }
+
+    fn replace_src_dst(&mut self, src: &mut Operand, dst: &mut Operand) {
+        if let Some(new_src) = self.replace_operand(src) {
+            *src = new_src;
+        }
+        if let Some(new_dst) = self.replace_operand(dst) {
+            *dst = new_dst;
+        }
+    }
+
+    fn replace_single(&mut self, operand: &mut Operand) {
+        if let Some(new_operand) = self.replace_operand(operand) {
+            *operand = new_operand;
+        }
+    }
 }
 
 impl VisitorMut for PseudoRegReplacer {
@@ -89,87 +104,18 @@ impl VisitorMut for PseudoRegReplacer {
     fn visit_instruction(&mut self, instruction: &mut Instruction) {
         use crate::assembly::ast::Instruction::*;
         match instruction {
-            Mov { src, dst, .. } => {
-                if let Some(new_src) = self.replace_operand(src) {
-                    *src = new_src;
-                }
-                if let Some(new_dst) = self.replace_operand(dst) {
-                    *dst = new_dst;
-                }
-            }
-            MovSx { src, dst, .. } => {
-                if let Some(new_src) = self.replace_operand(src) {
-                    *src = new_src;
-                }
-                if let Some(new_dst) = self.replace_operand(dst) {
-                    *dst = new_dst;
-                }
-            }
-            MovZeroExtend { src, dst, .. } => {
-                if let Some(new_src) = self.replace_operand(src) {
-                    *src = new_src;
-                }
-                if let Some(new_dst) = self.replace_operand(dst) {
-                    *dst = new_dst;
-                }
-            }
-            Unary { operand, .. } => {
-                if let Some(new_operand) = self.replace_operand(operand) {
-                    *operand = new_operand;
-                }
-            }
-            Binary { left, right, .. } => {
-                if let Some(new_left) = self.replace_operand(left) {
-                    *left = new_left;
-                }
-                if let Some(new_right) = self.replace_operand(right) {
-                    *right = new_right;
-                }
-            }
-            Idiv { operand, .. } => {
-                if let Some(new_operand) = self.replace_operand(operand) {
-                    *operand = new_operand;
-                }
-            }
-            Div { operand, .. } => {
-                if let Some(new_operand) = self.replace_operand(operand) {
-                    *operand = new_operand;
-                }
-            }
-            Cmp { op1, op2, .. } => {
-                if let Some(new_op1) = self.replace_operand(op1) {
-                    *op1 = new_op1;
-                }
-                if let Some(new_op2) = self.replace_operand(op2) {
-                    *op2 = new_op2;
-                }
-            }
-            SetCC(_, operand) => {
-                if let Some(new_operand) = self.replace_operand(operand) {
-                    *operand = new_operand;
-                }
-            }
-            Push(operand) => {
-                if let Some(new_operand) = self.replace_operand(operand) {
-                    *operand = new_operand;
-                }
-            }
-            ConvertIntToDouble { src, dst, .. } => {
-                if let Some(new_src) = self.replace_operand(src) {
-                    *src = new_src;
-                }
-                if let Some(new_dst) = self.replace_operand(dst) {
-                    *dst = new_dst;
-                }
-            }
-            ConvertDoubleToInt { src, dst, .. } => {
-                if let Some(new_src) = self.replace_operand(src) {
-                    *src = new_src;
-                }
-                if let Some(new_dst) = self.replace_operand(dst) {
-                    *dst = new_dst;
-                }
-            }
+            Mov { src, dst, .. } => self.replace_src_dst(src, dst),
+            MovSx { src, dst, .. } => self.replace_src_dst(src, dst),
+            MovZeroExtend { src, dst, .. } => self.replace_src_dst(src, dst),
+            Unary { operand, .. } => self.replace_single(operand),
+            Binary { left, right, .. } => self.replace_src_dst(left, right),
+            Idiv { operand, .. } => self.replace_single(operand),
+            Div { operand, .. } => self.replace_single(operand),
+            Cmp { op1, op2, .. } => self.replace_src_dst(op1, op2),
+            SetCC(_, operand) => self.replace_single(operand),
+            Push(operand) => self.replace_single(operand),
+            ConvertIntToDouble { src, dst, .. } => self.replace_src_dst(src, dst),
+            ConvertDoubleToInt { src, dst, .. } => self.replace_src_dst(src, dst),
             _ => {}
         }
     }
